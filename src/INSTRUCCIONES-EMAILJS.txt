@@ -1,0 +1,65 @@
+================================================================
+   INSTRUCCIONES RÁPIDAS - CONFIGURACIÓN DE EMAIL
+================================================================
+
+📧 ENVÍO DE CÓDIGO POR EMAIL PARA RECUPERACIÓN DE CONTRASEÑA
+
+ESTADO ACTUAL:
+--------------
+✅ El sistema está funcionando en MODO DESARROLLO
+✅ Los códigos se muestran en notificaciones dentro de la app
+⚠️  Para enviar emails REALES, necesitas configurar EmailJS
+
+PASOS RÁPIDOS PARA CONFIGURAR:
+-------------------------------
+
+1. REGISTRARSE EN EMAILJS (GRATIS)
+   👉 https://www.emailjs.com/
+   - Crear cuenta gratuita
+   - Verificar email
+
+2. CONECTAR TU EMAIL (Gmail recomendado)
+   - Email Services → Add New Service
+   - Seleccionar Gmail
+   - Autorizar conexión
+   - Copiar el SERVICE ID
+
+3. CREAR PLANTILLA DE EMAIL
+   - Email Templates → Create New Template
+   - Copiar la plantilla que está en el archivo:
+     /CONFIGURAR-EMAIL.md (en la sección Paso 3)
+   - Copiar el TEMPLATE ID
+
+4. OBTENER PUBLIC KEY
+   - Account → API Keys
+   - Copiar el PUBLIC KEY
+
+5. CONFIGURAR EN LA APP
+   - Abrir: /utils/emailConfig.ts
+   - Reemplazar:
+     * publicKey con tu PUBLIC KEY
+     * serviceId con tu SERVICE ID
+     * templateId con tu TEMPLATE ID
+   - Guardar archivo
+
+6. INSTALAR DEPENDENCIA
+   npm install @emailjs/browser
+
+7. PROBAR
+   - Ir a "¿Olvidaste tu contraseña?"
+   - Ingresar email
+   - Revisar bandeja de entrada
+
+================================================================
+
+DOCUMENTACIÓN COMPLETA: Ver archivo /CONFIGURAR-EMAIL.md
+
+LÍMITES GRATIS: 200 emails/mes
+
+¿PROBLEMAS?
+- Revisa la consola del navegador (F12)
+- Verifica que las credenciales sean correctas
+- Revisa carpeta de spam en tu email
+- Lee /CONFIGURAR-EMAIL.md para más detalles
+
+================================================================
