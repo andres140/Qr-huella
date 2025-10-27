@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -6,6 +6,8 @@ import { Label } from './ui/label';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { toast } from 'sonner@2.0.3';
+import { QRGenerator } from './QRGenerator';
+import { useZxing } from 'react-zxing';
 import { 
   Scan, 
   Camera, 
@@ -50,6 +52,7 @@ export function GuardView({
     message: string;
     person?: Person;
   } | null>(null);
+  const [isRealScanning, setIsRealScanning] = useState(false);
 
   // Formulario para registro de visitantes
   const [visitorForm, setVisitorForm] = useState({
@@ -59,6 +62,192 @@ export function GuardView({
     tipoSangre: 'O+' as 'O+' | 'O-' | 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-',
     motivo: ''
   });
+
+  // Estado para el QR generado más reciente
+  const [lastGeneratedQR, setLastGeneratedQR] = useState<VisitorQR | null>(null);
+  
+  // Estado para registro rápido de personas no encontradas
+  const [showQuickRegister, setShowQuickRegister] = useState(false);
+  const [scannedDocument, setScannedDocument] = useState('');
+  const [quickRegisterForm, setQuickRegisterForm] = useState({
+    nombre: '',
+    apellido: '',
+    tipoDocumento: 'CC' as 'CC' | 'TI' | 'CE',
+    rol: 'ESTUDIANTE' as 'ESTUDIANTE' | 'INSTRUCTOR' | 'ADMINISTRATIVO',
+    tipoSangre: 'O+' as 'O+' | 'O-' | 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-',
+    programa: '',
+    ficha: ''
+  });
+
+  // Hook de react-zxing para escaneo QR
+  const { ref: videoRef } = useZxing({
+    onDecodeResult(result) {
+      const code = result.getText();
+      console.log('✅ QR escaneado:', code);
+      // Detener el scanner
+      setIsRealScanning(false);
+      // Procesar el código QR escaneado
+      processQRCode(code);
+    },
+    onError(error) {
+      console.error('Error en el scanner:', error);
+    },
+    paused: !isRealScanning,
+  });
+
+  // Mover processQRCode antes del useEffect que lo usa
+  const processQRCode = useCallback((code: string) => {
+    // Primero verificar si es un QR de visitante temporal
+    const visitorQR = visitorQRs.find(qr => qr.codigoQR === code);
+    
+    if (visitorQR) {
+      // Validar fecha de expiración
+      const ahora = new Date();
+      if (visitorQR.fechaExpiracion < ahora) {
+        setScanResult({
+          success: false,
+          message: 'QR Expirado: El código ha vencido',
+          person: visitorQR.visitante
+        });
+        toast.error('❌ QR Expirado', {
+          description: 'El código QR del visitante ha vencido',
+          duration: 5000,
+        });
+        return;
+      }
+
+      if (visitorQR.estado === 'EXPIRADO' || visitorQR.estado === 'USADO') {
+        setScanResult({
+          success: false,
+          message: `QR Inválido: Estado ${visitorQR.estado}`,
+          person: visitorQR.visitante
+        });
+        toast.error('❌ QR Inválido', {
+          description: `Estado del QR: ${visitorQR.estado}`,
+          duration: 5000,
+        });
+        return;
+      }
+
+      // Es un visitante con QR válido
+      const accessRecord: AccessRecord = {
+        id: Date.now().toString(),
+        personaId: visitorQR.visitante.id,
+        persona: visitorQR.visitante,
+        tipo: 'ENTRADA',
+        timestamp: new Date(),
+        fechaHora: new Date(),
+        ubicacion: 'Entrada Principal',
+        codigoQR: code
+      };
+
+      setScanResult({
+        success: true,
+        message: 'Acceso permitido - Visitante',
+        person: visitorQR.visitante
+      });
+
+      onAccessGranted(accessRecord);
+      toast.success('✅ Acceso Permitido - Visitante', {
+        description: `${visitorQR.visitante.nombre} - QR válido`,
+        duration: 5000,
+      });
+      return;
+    }
+
+    // Si no es QR de visitante, buscar en personas registradas
+    const persona = personas.find(p => p.documento === code);
+    
+    if (!persona) {
+      // Persona no registrada - ofrecer registro rápido
+      setScannedDocument(code);
+      setShowQuickRegister(true);
+      setScanResult({
+        success: false,
+        message: '⚠️ Persona no registrada - Complete el formulario para registrar'
+      });
+      toast.warning('⚠️ Persona No Registrada', {
+        description: `Documento ${code} no encontrado. Complete los datos para registrar.`,
+        duration: 6000,
+      });
+      return;
+    }
+
+    // Estados que permiten el acceso
+    const estadosPermitidos = ['ACTIVO', 'EN FORMACION', 'POR CERTIFICAR', 'CERTIFICADO'];
+    
+    if (!estadosPermitidos.includes(persona.estado)) {
+      const mensajesEstado: Record<string, string> = {
+        'APLAZADO': 'Aprendiz aplazado - No puede ingresar',
+        'CANCELADO': 'Matrícula cancelada - No puede ingresar',
+        'SUSPENDIDO': 'Aprendiz suspendido - No puede ingresar',
+        'RETIRO VOLUNTARIO': 'Retiro voluntario - No puede ingresar',
+        'INACTIVO': 'Usuario inactivo - No puede ingresar'
+      };
+      
+      const mensajeDetalle = mensajesEstado[persona.estado] || 'Estado no válido para ingreso';
+      
+      setScanResult({
+        success: false,
+        message: `Acceso denegado: ${mensajeDetalle}`,
+        person: persona
+      });
+      toast.error('❌ Acceso Denegado', {
+        description: `${persona.nombre} - ${mensajeDetalle}`,
+        duration: 5000,
+      });
+      return;
+    }
+
+    // Determinar si es entrada o salida basado en el último registro de la persona
+    const ultimoAcceso = accessRecords.find(r => r.personaId === persona.id);
+    const tipo: 'ENTRADA' | 'SALIDA' = !ultimoAcceso || ultimoAcceso.tipo === 'SALIDA' ? 'ENTRADA' : 'SALIDA';
+
+    const accessRecord: AccessRecord = {
+      id: Date.now().toString(),
+      personaId: persona.id,
+      persona,
+      tipo,
+      timestamp: new Date(),
+      fechaHora: new Date(),
+      ubicacion: 'Entrada Principal',
+      codigoQR: code
+    };
+
+    setScanResult({
+      success: true,
+      message: `${accessRecord.tipo} registrada exitosamente`,
+      person: persona
+    });
+
+    onAccessGranted(accessRecord);
+
+    // Notificación mejorada
+    const now = new Date();
+    const formattedDate = new Intl.DateTimeFormat('es-CO', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(now);
+    
+    toast.success(`✅ ${tipo} Registrada`, {
+      description: `${persona.nombre} - ${persona.rol === 'ESTUDIANTE' ? 'APRENDIZ' : persona.rol} - ${formattedDate}`,
+      duration: 5000,
+    });
+  }, [personas, visitorQRs, accessRecords, onAccessGranted]);
+
+  const startRealScan = () => {
+    setIsScanning(false); // Desactivar simulación
+    setIsRealScanning(true);
+    setScanResult(null);
+  };
+
+  const stopScan = () => {
+    setIsRealScanning(false);
+    setIsScanning(false);
+  };
 
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('es-CO', {
@@ -109,80 +298,6 @@ export function GuardView({
       processQRCode(randomPerson.documento);
       setIsScanning(false);
     }, 2000);
-  };
-
-  const processQRCode = (code: string) => {
-    const persona = personas.find(p => p.documento === code);
-    
-    if (!persona) {
-      setScanResult({
-        success: false,
-        message: 'Código QR no válido o persona no registrada'
-      });
-      toast.error('❌ Acceso Denegado', {
-        description: 'Código QR no válido o persona no registrada',
-        duration: 4000,
-      });
-      return;
-    }
-
-    // Estados que permiten el acceso
-    const estadosPermitidos = ['ACTIVO', 'EN FORMACION', 'POR CERTIFICAR', 'CERTIFICADO'];
-    
-    // Estados que bloquean el acceso
-    const estadosBloqueados = ['INACTIVO', 'APLAZADO', 'CANCELADO', 'SUSPENDIDO', 'RETIRO VOLUNTARIO'];
-    
-    if (!estadosPermitidos.includes(persona.estado)) {
-      const mensajesEstado: Record<string, string> = {
-        'APLAZADO': 'Aprendiz aplazado - No puede ingresar',
-        'CANCELADO': 'Matrícula cancelada - No puede ingresar',
-        'SUSPENDIDO': 'Aprendiz suspendido - No puede ingresar',
-        'RETIRO VOLUNTARIO': 'Retiro voluntario - No puede ingresar',
-        'INACTIVO': 'Usuario inactivo - No puede ingresar'
-      };
-      
-      const mensajeDetalle = mensajesEstado[persona.estado] || 'Estado no válido para ingreso';
-      
-      setScanResult({
-        success: false,
-        message: `Acceso denegado: ${mensajeDetalle}`,
-        person: persona
-      });
-      toast.error('❌ Acceso Denegado', {
-        description: `${persona.nombre} - ${mensajeDetalle}`,
-        duration: 5000,
-      });
-      return;
-    }
-
-    // Determinar si es entrada o salida basado en el último registro de la persona
-    const ultimoAcceso = accessRecords.find(r => r.personaId === persona.id);
-    const tipo: 'ENTRADA' | 'SALIDA' = !ultimoAcceso || ultimoAcceso.tipo === 'SALIDA' ? 'ENTRADA' : 'SALIDA';
-
-    const accessRecord: AccessRecord = {
-      id: Date.now().toString(),
-      personaId: persona.id,
-      persona,
-      tipo,
-      timestamp: new Date(),
-      fechaHora: new Date(),
-      ubicacion: 'Entrada Principal',
-      codigoQR: code
-    };
-
-    setScanResult({
-      success: true,
-      message: `${accessRecord.tipo} registrada exitosamente`,
-      person: persona
-    });
-
-    onAccessGranted(accessRecord);
-
-    // Notificación mejorada
-    toast.success(`✅ ${tipo} Registrada`, {
-      description: `${persona.nombre} - ${persona.rol === 'ESTUDIANTE' ? 'APRENDIZ' : persona.rol} - ${formatDateTime(new Date())}`,
-      duration: 5000,
-    });
   };
 
   const handleManualEntry = () => {
@@ -263,6 +378,9 @@ export function GuardView({
 
     onAccessGranted(accessRecord);
 
+    // Guardar el QR generado para mostrarlo
+    setLastGeneratedQR(visitorQR);
+
     // Limpiar formulario
     setVisitorForm({
       nombre: '',
@@ -282,6 +400,67 @@ export function GuardView({
     toast.success('✅ Visitante Registrado', {
       description: `${visitor.nombre} - QR válido hasta: ${formatDateTime(fechaExpiracion)}`,
       duration: 6000,
+    });
+  };
+
+  // Manejar registro rápido de persona no encontrada
+  const handleQuickRegister = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Crear nueva persona
+    const newPerson: Person = {
+      id: Date.now().toString(),
+      nombre: quickRegisterForm.nombre,
+      apellido: quickRegisterForm.apellido,
+      documento: scannedDocument,
+      tipoDocumento: quickRegisterForm.tipoDocumento,
+      rol: quickRegisterForm.rol,
+      estado: quickRegisterForm.rol === 'ESTUDIANTE' ? 'EN FORMACION' : 'ACTIVO',
+      tipoSangre: quickRegisterForm.tipoSangre,
+      programa: quickRegisterForm.programa,
+      ficha: quickRegisterForm.ficha
+    };
+    
+    // Registrar la persona
+    onVisitorRegistered(newPerson);
+    
+    // Registrar acceso automáticamente
+    const now = new Date();
+    const accessRecord: AccessRecord = {
+      id: Date.now().toString(),
+      personaId: newPerson.id,
+      persona: newPerson,
+      tipo: 'ENTRADA',
+      timestamp: now,
+      fechaHora: now,
+      ubicacion: 'Entrada Principal',
+      codigoQR: scannedDocument
+    };
+    
+    onAccessGranted(accessRecord);
+    
+    // Limpiar y cerrar formulario
+    setQuickRegisterForm({
+      nombre: '',
+      apellido: '',
+      tipoDocumento: 'CC',
+      rol: 'ESTUDIANTE',
+      tipoSangre: 'O+',
+      programa: '',
+      ficha: ''
+    });
+    setShowQuickRegister(false);
+    setScannedDocument('');
+    
+    setScanResult({
+      success: true,
+      message: `${newPerson.rol === 'ESTUDIANTE' ? 'Aprendiz' : newPerson.rol} registrado y acceso concedido`,
+      person: newPerson
+    });
+    
+    toast.success('✅ Persona Registrada', {
+      description: `${newPerson.nombre} ${newPerson.apellido} - ${newPerson.rol === 'ESTUDIANTE' ? 'APRENDIZ' : newPerson.rol}`,
+      duration: 5000,
     });
   };
 
@@ -314,6 +493,143 @@ export function GuardView({
 
         {/* Escáner QR */}
         <TabsContent value="scanner" className="space-y-6">
+          {/* Formulario de Registro Rápido */}
+          {showQuickRegister && (
+            <Card className="border-2 border-orange-200 bg-orange-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-orange-700">
+                  <AlertCircle className="h-6 w-6" />
+                  Registro Rápido - Persona No Encontrada
+                </CardTitle>
+                <CardDescription>
+                  Documento: <strong>{scannedDocument}</strong> - Complete los datos para registrar
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleQuickRegister} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="qr-nombre">Nombre *</Label>
+                      <Input
+                        id="qr-nombre"
+                        type="text"
+                        placeholder="Nombre"
+                        value={quickRegisterForm.nombre}
+                        onChange={(e) => setQuickRegisterForm({...quickRegisterForm, nombre: e.target.value})}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="qr-apellido">Apellido *</Label>
+                      <Input
+                        id="qr-apellido"
+                        type="text"
+                        placeholder="Apellido"
+                        value={quickRegisterForm.apellido}
+                        onChange={(e) => setQuickRegisterForm({...quickRegisterForm, apellido: e.target.value})}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="qr-tipoDoc">Tipo de Documento *</Label>
+                      <select
+                        id="qr-tipoDoc"
+                        value={quickRegisterForm.tipoDocumento}
+                        onChange={(e) => setQuickRegisterForm({...quickRegisterForm, tipoDocumento: e.target.value as 'CC' | 'TI' | 'CE'})}
+                        className="w-full p-2 border border-gray-300 rounded-md"
+                        required
+                      >
+                        <option value="CC">Cédula de Ciudadanía</option>
+                        <option value="TI">Tarjeta de Identidad</option>
+                        <option value="CE">Cédula de Extranjería</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="qr-rol">Rol *</Label>
+                      <select
+                        id="qr-rol"
+                        value={quickRegisterForm.rol}
+                        onChange={(e) => setQuickRegisterForm({...quickRegisterForm, rol: e.target.value as 'ESTUDIANTE' | 'INSTRUCTOR' | 'ADMINISTRATIVO'})}
+                        className="w-full p-2 border border-gray-300 rounded-md"
+                        required
+                      >
+                        <option value="ESTUDIANTE">Aprendiz</option>
+                        <option value="INSTRUCTOR">Instructor</option>
+                        <option value="ADMINISTRATIVO">Administrativo</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="qr-tipoSangre">Tipo de Sangre *</Label>
+                      <select
+                        id="qr-tipoSangre"
+                        value={quickRegisterForm.tipoSangre}
+                        onChange={(e) => setQuickRegisterForm({...quickRegisterForm, tipoSangre: e.target.value as 'O+' | 'O-' | 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-'})}
+                        className="w-full p-2 border border-gray-300 rounded-md"
+                        required
+                      >
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                      </select>
+                    </div>
+
+                    {quickRegisterForm.rol === 'ESTUDIANTE' && (
+                      <>
+                        <div className="space-y-2">
+                          <Label htmlFor="qr-programa">Programa de Formación</Label>
+                          <Input
+                            id="qr-programa"
+                            type="text"
+                            placeholder="Ej: ADSO, Cocina, etc."
+                            value={quickRegisterForm.programa}
+                            onChange={(e) => setQuickRegisterForm({...quickRegisterForm, programa: e.target.value})}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="qr-ficha">Número de Ficha</Label>
+                          <Input
+                            id="qr-ficha"
+                            type="text"
+                            placeholder="Ej: 2898754"
+                            value={quickRegisterForm.ficha}
+                            onChange={(e) => setQuickRegisterForm({...quickRegisterForm, ficha: e.target.value})}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button type="submit" className="flex-1">
+                      Registrar y Dar Acceso
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => {
+                        setShowQuickRegister(false);
+                        setScannedDocument('');
+                        setScanResult(null);
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
@@ -327,18 +643,44 @@ export function GuardView({
               </CardHeader>
               <CardContent className="space-y-4">
                 {/* Área de escáneo */}
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                  {isScanning ? (
-                    <div className="flex flex-col items-center space-y-2">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center overflow-hidden">
+                  {isRealScanning ? (
+                    <div className="space-y-4">
+                      <div className="relative w-full aspect-square bg-black rounded-lg overflow-hidden">
+                        <video 
+                          ref={videoRef} 
+                          className="w-full h-full object-cover"
+                          style={{ 
+                            transform: 'scaleX(-1)', // Efecto espejo para mejor UX
+                          }}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="w-48 h-48 border-2 border-white rounded-lg shadow-lg"></div>
+                        </div>
+                      </div>
+                      <Button onClick={stopScan} variant="destructive" className="w-full">
+                        Detener Escáneo
+                      </Button>
+                    </div>
+                  ) : isScanning ? (
+                    <div className="flex flex-col items-center space-y-2 py-4">
                       <Camera className="h-12 w-12 animate-pulse text-blue-600" />
                       <p>Escaneando...</p>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center space-y-4">
-                      <Scan className="h-12 w-12 text-gray-400" />
-                      <Button onClick={simulateQRScan} className="w-full">
-                        Iniciar Escáneo
+                    <div className="flex flex-col items-center space-y-4 py-4">
+                      <Camera className="h-12 w-12 text-gray-400" />
+                      <div className="flex gap-2 w-full">
+                        <Button 
+                          onClick={startRealScan} 
+                          className="flex-1"
+                        >
+                          Iniciar Cámara
+                        </Button>
+                        <Button onClick={simulateQRScan} variant="outline" className="flex-1">
+                          Prueba
                       </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -436,6 +778,31 @@ export function GuardView({
 
         {/* Registro de Visitantes */}
         <TabsContent value="visitor" className="space-y-6">
+          {/* Mostrar QR generado más recientemente */}
+          {lastGeneratedQR && (
+            <Card className="border-2 border-blue-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-blue-600">
+                  <QrCode className="h-6 w-6" />
+                  QR Generado Exitosamente
+                </CardTitle>
+                <CardDescription>
+                  Descargue el código QR para entregar al visitante
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <QRGenerator visitorQR={lastGeneratedQR} />
+                <Button 
+                  onClick={() => setLastGeneratedQR(null)} 
+                  variant="outline" 
+                  className="w-full mt-4"
+                >
+                  Cerrar
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

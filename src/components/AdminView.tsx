@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Dashboard } from './Dashboard';
 import { UserManagement } from './UserManagement';
@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { toast } from 'sonner@2.0.3';
+import { QRGenerator } from './QRGenerator';
 import { 
   BarChart3, 
   Users, 
@@ -39,6 +40,8 @@ interface AdminViewProps {
   onUserAdd: (user: Omit<User, 'id'>) => void;
   onUserUpdate: (user: User) => void;
   onUserDelete: (userId: string) => void;
+  onVisitorRegistered?: (person: Person) => void;
+  onGenerateVisitorQR?: (visitorQR: VisitorQR) => void;
 }
 
 export function AdminView({
@@ -54,10 +57,13 @@ export function AdminView({
   onBulkPersonAdd,
   onUserAdd,
   onUserUpdate,
-  onUserDelete
+  onUserDelete,
+  onVisitorRegistered,
+  onGenerateVisitorQR
 }: AdminViewProps) {
   
   const notifiedQRs = useRef<Set<string>>(new Set());
+  const [selectedQR, setSelectedQR] = useState<VisitorQR | null>(null);
 
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('es-CO', {
@@ -178,6 +184,33 @@ export function AdminView({
 
         {/* Gestión de Visitantes - MEJORADO */}
         <TabsContent value="visitors" className="space-y-6">
+          {/* Mostrar QR seleccionado */}
+          {selectedQR && (
+            <Card className="border-2 border-blue-200">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-blue-600">
+                    <QrCode className="h-6 w-6" />
+                    QR de Visitante
+                  </CardTitle>
+                  <Button 
+                    onClick={() => setSelectedQR(null)} 
+                    variant="outline" 
+                    size="sm"
+                  >
+                    Cerrar
+                  </Button>
+                </div>
+                <CardDescription>
+                  Información del QR y descarga
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <QRGenerator visitorQR={selectedQR} />
+              </CardContent>
+            </Card>
+          )}
+
           <div className="grid grid-cols-1 gap-6">
             {/* Estadísticas Rápidas */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -296,6 +329,16 @@ export function AdminView({
                               <p className="text-xs text-muted-foreground mt-2">
                                 <strong>Código QR:</strong> {qr.codigoQR}
                               </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button 
+                                size="sm" 
+                                onClick={() => setSelectedQR(qr)}
+                                variant="outline"
+                              >
+                                <QrCode className="h-4 w-4 mr-1" />
+                                Ver QR
+                              </Button>
                             </div>
                           </div>
                         </div>

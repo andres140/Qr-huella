@@ -282,6 +282,8 @@ export default function App() {
             onUserAdd={handleUserAdd}
             onUserUpdate={handleUserUpdate}
             onUserDelete={handleUserDelete}
+            onVisitorRegistered={handleVisitorRegistered}
+            onGenerateVisitorQR={handleGenerateVisitorQR}
           />
         )}
       </main>
