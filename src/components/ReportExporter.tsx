@@ -636,49 +636,7 @@ export function ReportExporter({
         </CardContent>
       </Card>
 
-      {/* Tipos de reportes disponibles */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {reportTypes.map((reportType) => {
-          const Icon = reportType.icon;
-          return (
-            <Card key={reportType.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Icon className="h-5 w-5" />
-                  {reportType.nombre}
-                </CardTitle>
-                <CardDescription>
-                  {reportType.descripcion}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => generateReport(reportType.id, 'PDF')}
-                      disabled={isGenerating === `${reportType.id}_PDF_${Date.now()}`}
-                      className="flex-1"
-                      variant="outline"
-                    >
-                      <File className="h-4 w-4 mr-2" />
-                      Descargar TXT
-                    </Button>
-                    <Button
-                      onClick={() => generateReport(reportType.id, 'Excel')}
-                      disabled={isGenerating === `${reportType.id}_Excel_${Date.now()}`}
-                      className="flex-1"
-                      variant="outline"
-                    >
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Descargar CSV
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+      {/* Tipos de reportes disponibles (ocultados por petición) */}
     </div>
   );
 }
