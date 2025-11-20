@@ -49,6 +49,10 @@ app.use('/api/', limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Servir archivos estáticos de uploads
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Middleware de logging para debug
 app.use((req, res, next) => {
   console.log(`\n📡 ${req.method} ${req.path}`);

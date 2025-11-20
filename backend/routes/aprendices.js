@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { verificarToken } = require('./auth');
+const upload = require('../middleware/upload');
+const path = require('path');
+const fs = require('fs');
 
 // Middleware de autenticación
 router.use(verificarToken);
@@ -23,9 +26,12 @@ router.get('/', async (req, res) => {
         p.programa,
         p.ficha,
         p.estado,
+        p.foto,
+        COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
         rp.nombre_rol_persona as rol
       FROM personas p
       INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
       WHERE LOWER(rp.nombre_rol_persona) LIKE '%aprendiz%' OR LOWER(rp.nombre_rol_persona) LIKE '%estudiante%'
     `;
     const params = [];
@@ -57,7 +63,8 @@ router.get('/', async (req, res) => {
       codigoQR: a.codigoQR,
       programa: a.programa,
       ficha: a.ficha,
-      estado: a.estado,
+      estado: a.estado_detallado || a.estado, // Usar estado detallado si existe
+      foto: a.foto, // Incluir foto
       rol: a.rol
     }));
     
@@ -82,9 +89,12 @@ router.get('/:id', async (req, res) => {
         p.programa,
         p.ficha,
         p.estado,
+        p.foto,
+        COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
         rp.nombre_rol_persona as rol
       FROM personas p
       INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
       WHERE p.id_persona = ? 
         AND (LOWER(rp.nombre_rol_persona) LIKE '%aprendiz%' OR LOWER(rp.nombre_rol_persona) LIKE '%estudiante%')
     `, [req.params.id]);
@@ -107,7 +117,8 @@ router.get('/:id', async (req, res) => {
         codigoQR: a.codigoQR,
         programa: a.programa,
         ficha: a.ficha,
-        estado: a.estado,
+        estado: a.estado_detallado || a.estado,
+        foto: a.foto,
         rol: a.rol
       }
     });
@@ -131,9 +142,12 @@ router.get('/qr/:codigoQR', async (req, res) => {
         p.programa,
         p.ficha,
         p.estado,
+        p.foto,
+        COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
         rp.nombre_rol_persona as rol
       FROM personas p
       INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
       WHERE p.codigo_qr = ? 
         AND (LOWER(rp.nombre_rol_persona) LIKE '%aprendiz%' OR LOWER(rp.nombre_rol_persona) LIKE '%estudiante%')
     `, [req.params.codigoQR]);
@@ -156,7 +170,8 @@ router.get('/qr/:codigoQR', async (req, res) => {
         codigoQR: a.codigoQR,
         programa: a.programa,
         ficha: a.ficha,
-        estado: a.estado,
+        estado: a.estado_detallado || a.estado,
+        foto: a.foto,
         rol: a.rol
       }
     });
@@ -180,9 +195,11 @@ router.get('/documento/:documento', async (req, res) => {
         p.programa,
         p.ficha,
         p.estado,
+        COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
         rp.nombre_rol_persona as rol
       FROM personas p
       INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
       WHERE p.documento = ? 
         AND (LOWER(rp.nombre_rol_persona) LIKE '%aprendiz%' OR LOWER(rp.nombre_rol_persona) LIKE '%estudiante%')
     `, [req.params.documento]);
@@ -205,7 +222,8 @@ router.get('/documento/:documento', async (req, res) => {
         codigoQR: a.codigoQR,
         programa: a.programa,
         ficha: a.ficha,
-        estado: a.estado,
+        estado: a.estado_detallado || a.estado,
+        foto: a.foto,
         rol: a.rol
       }
     });
@@ -266,12 +284,32 @@ router.post('/', async (req, res) => {
     const programaLimpio = programa ? String(programa).trim().substring(0, 200) : null;
     const fichaLimpia = ficha ? String(ficha).trim().substring(0, 50) : null;
     
-    // Validar estado
-    let estadoLimpio = estado || 'ACTIVO';
-    estadoLimpio = String(estadoLimpio).toUpperCase().trim();
-    if (!['ACTIVO', 'INACTIVO'].includes(estadoLimpio)) {
-      console.log(`⚠️ Estado inválido "${estado}", usando 'ACTIVO' por defecto`);
-      estadoLimpio = 'ACTIVO';
+    // Validar y obtener estado de persona (estados_personas)
+    let idEstadoPersona = null;
+    let estadoLimpio = 'ACTIVO'; // Estado básico por defecto
+    
+    if (estado) {
+      const estadoNormalizado = String(estado).toUpperCase().trim();
+      
+      // Buscar el estado en estados_personas
+      const [estadosEncontrados] = await db.query(
+        'SELECT id_estado_persona FROM estados_personas WHERE UPPER(nombre_estado) = ?',
+        [estadoNormalizado]
+      );
+      
+      if (estadosEncontrados.length > 0) {
+        idEstadoPersona = estadosEncontrados[0].id_estado_persona;
+        // Si el estado es ACTIVO o INACTIVO, también actualizar el campo estado
+        if (['ACTIVO', 'INACTIVO'].includes(estadoNormalizado)) {
+          estadoLimpio = estadoNormalizado;
+        }
+      } else {
+        // Si no existe el estado, intentar crear uno nuevo o usar ACTIVO
+        console.log(`⚠️ Estado "${estadoNormalizado}" no encontrado en estados_personas, usando ACTIVO por defecto`);
+        if (['ACTIVO', 'INACTIVO'].includes(estadoNormalizado)) {
+          estadoLimpio = estadoNormalizado;
+        }
+      }
     }
     
     console.log('📝 Datos limpios para insertar:', {
@@ -344,10 +382,10 @@ router.post('/', async (req, res) => {
     await db.query(
       `INSERT INTO personas (
         tipo_documento, documento, nombres, apellidos, codigo_qr, 
-        programa, ficha, estado, id_usuario, id_rol_persona
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        programa, ficha, estado, id_usuario, id_rol_persona, id_estado_persona
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [tipoDocumento, documentoLimpio, nombresLimpio, apellidosLimpio, codigoQR, 
-       programaLimpio, fichaLimpia, estadoLimpio, idUsuarioFinal, idRolAprendiz]
+       programaLimpio, fichaLimpia, estadoLimpio, idUsuarioFinal, idRolAprendiz, idEstadoPersona]
     );
     
     console.log('✅ Aprendiz insertado exitosamente');
@@ -363,9 +401,12 @@ router.post('/', async (req, res) => {
         p.programa,
         p.ficha,
         p.estado,
+        p.foto,
+        COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
         rp.nombre_rol_persona as rol
       FROM personas p
       INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
       WHERE p.documento = ?
     `, [documentoLimpio]);
     
@@ -384,7 +425,8 @@ router.post('/', async (req, res) => {
         codigoQR: a.codigoQR,
         programa: a.programa,
         ficha: a.ficha,
-        estado: a.estado,
+        estado: a.estado_detallado || a.estado,
+        foto: a.foto,
         rol: a.rol
       }
     });
@@ -432,6 +474,33 @@ router.put('/:id', async (req, res) => {
       }
     }
     
+    // Manejar estado si se proporciona
+    let idEstadoPersonaUpdate = null;
+    let estadoLimpioUpdate = null;
+    
+    if (estado) {
+      const estadoNormalizado = String(estado).toUpperCase().trim();
+      
+      // Buscar el estado en estados_personas
+      const [estadosEncontrados] = await db.query(
+        'SELECT id_estado_persona FROM estados_personas WHERE UPPER(nombre_estado) = ?',
+        [estadoNormalizado]
+      );
+      
+      if (estadosEncontrados.length > 0) {
+        idEstadoPersonaUpdate = estadosEncontrados[0].id_estado_persona;
+        // Si el estado es ACTIVO o INACTIVO, también actualizar el campo estado
+        if (['ACTIVO', 'INACTIVO'].includes(estadoNormalizado)) {
+          estadoLimpioUpdate = estadoNormalizado;
+        }
+      } else {
+        // Si no existe el estado, solo actualizar si es ACTIVO o INACTIVO
+        if (['ACTIVO', 'INACTIVO'].includes(estadoNormalizado)) {
+          estadoLimpioUpdate = estadoNormalizado;
+        }
+      }
+    }
+    
     await db.query(
       `UPDATE personas SET 
         nombres = COALESCE(?, nombres),
@@ -440,9 +509,10 @@ router.put('/:id', async (req, res) => {
         tipo_documento = COALESCE(?, tipo_documento),
         programa = COALESCE(?, programa),
         ficha = COALESCE(?, ficha),
-        estado = COALESCE(?, estado)
+        estado = COALESCE(?, estado),
+        id_estado_persona = COALESCE(?, id_estado_persona)
       WHERE id_persona = ?`,
-      [nombre, apellido, documento, tipoDocumento, programa, ficha, estado, req.params.id]
+      [nombre, apellido, documento, tipoDocumento, programa, ficha, estadoLimpioUpdate, idEstadoPersonaUpdate, req.params.id]
     );
     
     const [aprendizActualizado] = await db.query(`
@@ -456,9 +526,12 @@ router.put('/:id', async (req, res) => {
         p.programa,
         p.ficha,
         p.estado,
+        p.foto,
+        COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
         rp.nombre_rol_persona as rol
       FROM personas p
       INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
       WHERE p.id_persona = ?
     `, [req.params.id]);
     
@@ -476,7 +549,8 @@ router.put('/:id', async (req, res) => {
         codigoQR: a.codigoQR,
         programa: a.programa,
         ficha: a.ficha,
-        estado: a.estado,
+        estado: a.estado_detallado || a.estado,
+        foto: a.foto,
         rol: a.rol
       }
     });
@@ -627,10 +701,32 @@ router.post('/bulk', async (req, res) => {
         const programaLimpio = programa ? String(programa).trim().substring(0, 200) : null;
         const fichaLimpia = ficha ? String(ficha).trim().substring(0, 50) : null;
         
-        // Validar estado
-        let estadoLimpio = String(estado).toUpperCase().trim();
-        if (!['ACTIVO', 'INACTIVO'].includes(estadoLimpio)) {
-          estadoLimpio = 'ACTIVO';
+        // Validar y obtener estado de persona (estados_personas)
+        let idEstadoPersona = null;
+        let estadoLimpio = 'ACTIVO'; // Estado básico por defecto
+        
+        if (estado) {
+          const estadoNormalizado = String(estado).toUpperCase().trim();
+          
+          // Buscar el estado en estados_personas
+          const [estadosEncontrados] = await db.query(
+            'SELECT id_estado_persona FROM estados_personas WHERE UPPER(nombre_estado) = ?',
+            [estadoNormalizado]
+          );
+          
+          if (estadosEncontrados.length > 0) {
+            idEstadoPersona = estadosEncontrados[0].id_estado_persona;
+            // Si el estado es ACTIVO o INACTIVO, también actualizar el campo estado
+            if (['ACTIVO', 'INACTIVO'].includes(estadoNormalizado)) {
+              estadoLimpio = estadoNormalizado;
+            }
+          } else {
+            // Si no existe el estado, intentar crear uno nuevo o usar ACTIVO
+            console.log(`⚠️ Estado "${estadoNormalizado}" no encontrado en estados_personas, usando ACTIVO por defecto`);
+            if (['ACTIVO', 'INACTIVO'].includes(estadoNormalizado)) {
+              estadoLimpio = estadoNormalizado;
+            }
+          }
         }
         
         // Validar tipo de documento
@@ -646,10 +742,10 @@ router.post('/bulk', async (req, res) => {
         await db.query(
           `INSERT INTO personas (
             tipo_documento, documento, nombres, apellidos, codigo_qr, 
-            programa, ficha, estado, id_usuario, id_rol_persona
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            programa, ficha, estado, id_usuario, id_rol_persona, id_estado_persona
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [tipoDocLimpio, documentoLimpio, nombresLimpio, apellidosLimpio, codigoQR, 
-           programaLimpio, fichaLimpia, estadoLimpio, idUsuarioFinal, idRolAprendiz]
+           programaLimpio, fichaLimpia, estadoLimpio, idUsuarioFinal, idRolAprendiz, idEstadoPersona]
         );
         
         resultados.exitosos++;
@@ -680,6 +776,208 @@ router.post('/bulk', async (req, res) => {
     res.status(500).json({ 
       error: true, 
       message: 'Error al procesar carga masiva: ' + error.message 
+    });
+  }
+});
+
+// Subir foto de aprendiz
+router.post('/:id/foto', async (req, res) => {
+  try {
+    // Primero verificar que el aprendiz existe y obtener su documento
+    const [aprendizExiste] = await db.query(`
+      SELECT p.id_persona, p.documento, p.foto
+      FROM personas p
+      INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      WHERE p.id_persona = ? 
+        AND (LOWER(rp.nombre_rol_persona) LIKE '%aprendiz%' OR LOWER(rp.nombre_rol_persona) LIKE '%estudiante%')
+    `, [req.params.id]);
+
+    if (aprendizExiste.length === 0) {
+      return res.status(404).json({ error: true, message: 'Aprendiz no encontrado' });
+    }
+
+    const aprendiz = aprendizExiste[0];
+    
+    // Configurar multer con el documento del aprendiz
+    const multer = require('multer');
+    const storage = multer.diskStorage({
+      destination: function (req, file, cb) {
+        const uploadsDir = path.join(__dirname, '../uploads/fotos');
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        cb(null, uploadsDir);
+      },
+      filename: function (req, file, cb) {
+        const timestamp = Date.now();
+        const ext = path.extname(file.originalname).toLowerCase();
+        const filename = `${aprendiz.documento}-${timestamp}${ext}`;
+        cb(null, filename);
+      }
+    });
+
+    const fileFilter = (req, file, cb) => {
+      const allowedTypes = /jpeg|jpg|png|gif|webp/;
+      const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+      const mimetype = allowedTypes.test(file.mimetype);
+      
+      if (mimetype && extname) {
+        return cb(null, true);
+      } else {
+        cb(new Error('Solo se permiten archivos de imagen (JPEG, JPG, PNG, GIF, WEBP)'));
+      }
+    };
+
+    const uploadSingle = multer({
+      storage: storage,
+      limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB máximo
+      },
+      fileFilter: fileFilter
+    }).single('foto');
+
+    // Ejecutar upload
+    uploadSingle(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({ 
+          error: true, 
+          message: err.message || 'Error al subir archivo' 
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ 
+          error: true, 
+          message: 'No se proporcionó ningún archivo' 
+        });
+      }
+    
+      // Eliminar foto anterior si existe
+      if (aprendiz.foto) {
+        const fotoAnteriorPath = path.join(__dirname, '../uploads/fotos', path.basename(aprendiz.foto));
+        if (fs.existsSync(fotoAnteriorPath)) {
+          try {
+            fs.unlinkSync(fotoAnteriorPath);
+            console.log('✅ Foto anterior eliminada:', fotoAnteriorPath);
+          } catch (error) {
+            console.warn('⚠️ No se pudo eliminar la foto anterior:', error.message);
+          }
+        }
+      }
+
+      // Guardar ruta de la foto en la base de datos
+      // Formato: uploads/fotos/[documento]-[timestamp].ext
+      const fotoRuta = `uploads/fotos/${req.file.filename}`;
+      
+      await db.query(
+        'UPDATE personas SET foto = ? WHERE id_persona = ?',
+        [fotoRuta, req.params.id]
+      );
+
+      console.log('✅ Foto actualizada para aprendiz:', aprendiz.documento);
+
+      // Obtener aprendiz actualizado
+      const [aprendizActualizado] = await db.query(`
+        SELECT 
+          p.id_persona as id,
+          p.tipo_documento as tipoDocumento,
+          p.documento,
+          p.nombres,
+          p.apellidos,
+          p.codigo_qr as codigoQR,
+          p.programa,
+          p.ficha,
+          p.estado,
+          p.foto,
+          COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
+          rp.nombre_rol_persona as rol
+        FROM personas p
+        INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+        LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
+        WHERE p.id_persona = ?
+      `, [req.params.id]);
+
+      const a = aprendizActualizado[0];
+      res.json({ 
+        success: true, 
+        message: 'Foto subida exitosamente',
+        data: {
+          id: a.id,
+          nombre: a.nombres,
+          apellido: a.apellidos,
+          nombres: a.nombres,
+          apellidos: a.apellidos,
+          documento: a.documento,
+          tipoDocumento: a.tipoDocumento,
+          codigoQR: a.codigoQR,
+          programa: a.programa,
+          ficha: a.ficha,
+          estado: a.estado_detallado || a.estado,
+          foto: a.foto,
+          rol: a.rol
+        }
+      });
+    });
+  } catch (error) {
+    console.error('❌ Error al subir foto:', error);
+    
+    res.status(500).json({ 
+      error: true, 
+      message: 'Error al subir foto: ' + error.message 
+    });
+  }
+});
+
+// Eliminar foto de aprendiz
+router.delete('/:id/foto', async (req, res) => {
+  try {
+    // Verificar que el aprendiz existe
+    const [aprendizExiste] = await db.query(`
+      SELECT p.id_persona, p.documento, p.foto
+      FROM personas p
+      INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      WHERE p.id_persona = ? 
+        AND (LOWER(rp.nombre_rol_persona) LIKE '%aprendiz%' OR LOWER(rp.nombre_rol_persona) LIKE '%estudiante%')
+    `, [req.params.id]);
+
+    if (aprendizExiste.length === 0) {
+      return res.status(404).json({ error: true, message: 'Aprendiz no encontrado' });
+    }
+
+    const aprendiz = aprendizExiste[0];
+    
+    if (!aprendiz.foto) {
+      return res.status(400).json({ error: true, message: 'El aprendiz no tiene foto asignada' });
+    }
+
+    // Eliminar archivo físico
+    const fotoPath = path.join(__dirname, '../uploads/fotos', path.basename(aprendiz.foto));
+    if (fs.existsSync(fotoPath)) {
+      try {
+        fs.unlinkSync(fotoPath);
+        console.log('✅ Foto eliminada del sistema de archivos:', fotoPath);
+      } catch (error) {
+        console.warn('⚠️ No se pudo eliminar el archivo físico:', error.message);
+      }
+    }
+
+    // Eliminar referencia en la base de datos
+    await db.query(
+      'UPDATE personas SET foto = NULL WHERE id_persona = ?',
+      [req.params.id]
+    );
+
+    console.log('✅ Foto eliminada para aprendiz:', aprendiz.documento);
+
+    res.json({ 
+      success: true, 
+      message: 'Foto eliminada exitosamente'
+    });
+  } catch (error) {
+    console.error('❌ Error al eliminar foto:', error);
+    res.status(500).json({ 
+      error: true, 
+      message: 'Error al eliminar foto: ' + error.message 
     });
   }
 });

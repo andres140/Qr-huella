@@ -102,8 +102,8 @@ export function ReportExporter({
         
         if (numDocIdx === -1) {
           toast.error('❌ Columna No Encontrada', {
-            description: 'No se encontró la columna de Número de Documento',
-            duration: 4000,
+            description: 'No se encontró la columna de Número de Documento. Busque columnas como: "Documento", "Número Documento", "Identificación", "Cédula"',
+            duration: 6000,
           });
           setUploadedFileName('');
           return;
@@ -126,8 +126,15 @@ export function ReportExporter({
           }
         }
         
+        // Deduplicación mejorada: normalizar documentos antes de comparar
         const uniqueData = Array.from(
-          new Map(data.map(item => [item.numeroDocumento, item])).values()
+          new Map(
+            data.map(item => {
+              // Normalizar documento: solo números, sin espacios
+              const docNormalizado = String(item.numeroDocumento).replace(/\D/g, '').trim();
+              return [docNormalizado, item];
+            })
+          ).values()
         );
         
         setJuiciosData(uniqueData);
@@ -146,8 +153,13 @@ export function ReportExporter({
         
         const addedCount = await onBulkPersonAdd(personasToAdd);
         
+        const duplicados = uniqueData.length - addedCount;
+        const mensaje = duplicados > 0 
+          ? `${uniqueData.length} registros procesados, ${addedCount} nuevos guardados, ${duplicados} duplicados omitidos`
+          : `${uniqueData.length} registros procesados, ${addedCount} nuevos guardados en BD`;
+        
         toast.success('✅ Archivo CSV Procesado', {
-          description: `${uniqueData.length} registros procesados, ${addedCount} nuevos guardados en BD`,
+          description: mensaje,
           duration: 6000,
         });
         
@@ -191,8 +203,8 @@ export function ReportExporter({
         
         if (headerRowIndex === -1) {
           toast.error('❌ Error de Formato', {
-            description: 'No se encontró la fila de encabezados en el archivo',
-            duration: 4000,
+            description: 'No se encontró la fila de encabezados en el archivo. Asegúrese de que el archivo tenga una fila con las columnas: Tipo Documento, Número Documento, Nombre',
+            duration: 6000,
           });
           setUploadedFileName('');
           return;
@@ -219,8 +231,8 @@ export function ReportExporter({
         
         if (numDocIdx === -1) {
           toast.error('❌ Columna No Encontrada', {
-            description: 'No se encontró la columna de Número de Documento',
-            duration: 4000,
+            description: 'No se encontró la columna de Número de Documento. Busque columnas como: "Documento", "Número Documento", "Identificación", "Cédula"',
+            duration: 6000,
           });
           setUploadedFileName('');
           return;
@@ -250,14 +262,21 @@ export function ReportExporter({
           }
         }
         
+        // Deduplicación mejorada: normalizar documentos antes de comparar
         const uniqueData = Array.from(
-          new Map(processedData.map(item => [item.numeroDocumento, item])).values()
+          new Map(
+            processedData.map(item => {
+              // Normalizar documento: solo números, sin espacios
+              const docNormalizado = String(item.numeroDocumento).replace(/\D/g, '').trim();
+              return [docNormalizado, item];
+            })
+          ).values()
         );
         
         if (uniqueData.length === 0) {
-          toast.error('❌ Sin Datos', {
-            description: 'No se pudieron extraer datos del archivo',
-            duration: 4000,
+          toast.error('❌ Sin Datos Válidos', {
+            description: 'No se pudieron extraer datos válidos del archivo. Verifique que el archivo contenga columnas: Número Documento, Nombre, y opcionalmente: Ficha, Tipo Documento, Apellido, Estado',
+            duration: 6000,
           });
           setUploadedFileName('');
           return;
@@ -279,8 +298,13 @@ export function ReportExporter({
         
         const addedCount = await onBulkPersonAdd(personasToAdd);
         
+        const duplicados = uniqueData.length - addedCount;
+        const mensaje = duplicados > 0 
+          ? `${uniqueData.length} registros procesados, ${addedCount} nuevos guardados, ${duplicados} duplicados omitidos`
+          : `${uniqueData.length} registros procesados, ${addedCount} nuevos guardados en BD`;
+        
         toast.success('✅ Archivo Excel Procesado', {
-          description: `${uniqueData.length} registros procesados, ${addedCount} nuevos guardados en BD`,
+          description: mensaje,
           duration: 6000,
         });
         
@@ -330,6 +354,7 @@ export function ReportExporter({
       const today = now.toISOString().split('T')[0];
       
       if (tipo === 'juicios-evaluativos') {
+        // Usar solo juiciosData si está disponible, evitar duplicar con personas
         const datosReporte = juiciosData.length > 0 
           ? juiciosData 
           : personas
@@ -343,8 +368,15 @@ export function ReportExporter({
                 estado: e.estado
               }));
         
+        // Deduplicación mejorada: usar documento normalizado (solo números) como clave
         const datosUnicos = Array.from(
-          new Map(datosReporte.map(item => [item.numeroDocumento, item])).values()
+          new Map(
+            datosReporte.map(item => {
+              // Normalizar documento: solo números, sin espacios
+              const docNormalizado = String(item.numeroDocumento).replace(/\D/g, '').trim();
+              return [docNormalizado, item];
+            })
+          ).values()
         );
         
         if (formato === 'Excel') {

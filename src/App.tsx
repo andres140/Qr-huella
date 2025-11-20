@@ -101,13 +101,13 @@ export default function App() {
             nombre: a.nombre,
             apellido: a.apellido || '',
             documento: a.documento,
-            tipoDocumento: a.tipo_documento,
+            tipoDocumento: a.tipoDocumento || a.tipo_documento || 'CC',
             programa: a.programa || '',
             ficha: a.ficha || '',
             rol: 'ESTUDIANTE', // Los aprendices siempre son estudiantes
             estado: a.estado,
             tipoSangre: 'O+', // Valor por defecto, se puede agregar luego
-            foto: null,
+            foto: a.foto || null,
           }));
           setPersonas(aprendicesAsPersonas);
         }
@@ -365,13 +365,13 @@ export default function App() {
             nombre: nuevoAprendiz.nombre,
             apellido: nuevoAprendiz.apellido || '',
             documento: nuevoAprendiz.documento,
-            tipoDocumento: nuevoAprendiz.tipo_documento,
+            tipoDocumento: nuevoAprendiz.tipoDocumento || nuevoAprendiz.tipo_documento || 'CC',
             programa: nuevoAprendiz.programa || '',
             ficha: nuevoAprendiz.ficha || '',
             rol: 'ESTUDIANTE',
             estado: nuevoAprendiz.estado,
             tipoSangre: 'O+',
-            foto: null,
+            foto: nuevoAprendiz.foto || null,
           };
           setPersonas(prev => [...prev, newPerson]);
           toast.success('✅ Aprendiz registrado correctamente');
@@ -427,13 +427,13 @@ export default function App() {
             nombre: a.nombre,
             apellido: a.apellido || '',
             documento: a.documento,
-            tipoDocumento: a.tipo_documento,
+            tipoDocumento: a.tipoDocumento || a.tipo_documento || 'CC',
             programa: a.programa || '',
             ficha: a.ficha || '',
             rol: 'ESTUDIANTE',
             estado: a.estado,
             tipoSangre: 'O+',
-            foto: null,
+            foto: a.foto || null,
           }));
           setPersonas(prev => {
             // Mantener personas que no son estudiantes y agregar/actualizar aprendices

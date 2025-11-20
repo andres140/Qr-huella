@@ -508,6 +508,32 @@ export const aprendicesAPI = {
     
     return handleResponse(response);
   },
+  
+  uploadFoto: async (id: string, file: File) => {
+    const formData = new FormData();
+    formData.append('foto', file);
+    formData.append('documento', ''); // Se usará el documento del aprendiz
+    
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${API_URL}/aprendices/${id}/foto`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData,
+    });
+    
+    return handleResponse(response);
+  },
+  
+  deleteFoto: async (id: string) => {
+    const response = await fetch(`${API_URL}/aprendices/${id}/foto`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    
+    return handleResponse(response);
+  },
 };
 
 // ============================================
