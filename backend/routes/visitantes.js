@@ -534,18 +534,39 @@ router.post('/validar-qr', async (req, res) => {
       if (entradasSinSalida.length > 0) {
         fechaEntradaAnterior = entradasSinSalida[0].fecha_entrada;
         console.log(`📝 Detectada entrada sin salida. Registrando salida automáticamente...`);
-        console.log(`   Fecha entrada: ${fechaEntradaAnterior}`);
+        console.log(`   Fecha entrada: ${fechaEntradaAnterior.toLocaleString('es-CO')}`);
         console.log(`   Fecha salida (ahora): ${ahora.toLocaleString('es-CO')}`);
         
-        // Registrar la salida automáticamente
-        await db.query(
-          `INSERT INTO registros_entrada_salida (id_persona, tipo, fecha_entrada, fecha_salida)
-           VALUES (?, 'SALIDA', ?, ?)`,
-          [persona.id_persona, fechaEntradaAnterior, ahora]
+        // Obtener el ID del registro de entrada para actualizarlo
+        const [registroEntrada] = await db.query(
+          `SELECT id_registro_entrada_salida
+           FROM registros_entrada_salida
+           WHERE id_persona = ? AND tipo = 'ENTRADA' AND fecha_entrada = ? AND fecha_salida IS NULL
+           ORDER BY fecha_entrada DESC
+           LIMIT 1`,
+          [persona.id_persona, fechaEntradaAnterior]
         );
         
+        if (registroEntrada.length > 0) {
+          // Actualizar el registro de entrada existente con la fecha de salida
+          await db.query(
+            `UPDATE registros_entrada_salida 
+             SET tipo = 'SALIDA', fecha_salida = ?
+             WHERE id_registro_entrada_salida = ?`,
+            [ahora, registroEntrada[0].id_registro_entrada_salida]
+          );
+          console.log(`✅ Salida registrada automáticamente para visitante expirado (actualizado registro existente)`);
+        } else {
+          // Si no se encuentra el registro, crear uno nuevo
+          await db.query(
+            `INSERT INTO registros_entrada_salida (id_persona, tipo, fecha_entrada, fecha_salida)
+             VALUES (?, 'SALIDA', ?, ?)`,
+            [persona.id_persona, fechaEntradaAnterior, ahora]
+          );
+          console.log(`✅ Salida registrada automáticamente para visitante expirado (nuevo registro)`);
+        }
+        
         salidaRegistrada = true;
-        console.log(`✅ Salida registrada automáticamente para visitante expirado`);
       }
       
       // Actualizar la BD con la fecha/hora en que se detectó la expiración
@@ -684,11 +705,11 @@ router.post('/registrar-acceso', async (req, res) => {
          VALUES (?, ?, ?)`,
         [visitanteId, tipoFinal, fechaHoraAhora]
       );
-      console.log('✅ Registro de ENTRADA creado con hora exacta');
+      console.log(`✅ Registro de ENTRADA creado con hora exacta: ${fechaHoraAhora.toLocaleString('es-CO')}`);
     } else {
-      // Para salida, buscar la entrada previa para incluir su fecha_entrada
+      // Para salida, buscar la entrada previa sin salida para incluir su fecha_entrada
       const [entradaPrevia] = await db.query(
-        `SELECT fecha_entrada
+        `SELECT id_registro_entrada_salida, fecha_entrada
          FROM registros_entrada_salida
          WHERE id_persona = ? AND tipo = 'ENTRADA' AND fecha_salida IS NULL
          ORDER BY fecha_entrada DESC
@@ -696,14 +717,25 @@ router.post('/registrar-acceso', async (req, res) => {
         [visitanteId]
       );
       
-      const fechaEntrada = entradaPrevia.length > 0 ? entradaPrevia[0].fecha_entrada : fechaHoraAhora;
-      
-      await db.query(
-        `INSERT INTO registros_entrada_salida (id_persona, tipo, fecha_entrada, fecha_salida)
-         VALUES (?, ?, ?, ?)`,
-        [visitanteId, tipoFinal, fechaEntrada, fechaHoraAhora]
-      );
-      console.log('✅ Registro de SALIDA creado con hora exacta');
+      if (entradaPrevia.length > 0) {
+        // Actualizar el registro de entrada existente con la fecha de salida
+        await db.query(
+          `UPDATE registros_entrada_salida 
+           SET tipo = 'SALIDA', fecha_salida = ?
+           WHERE id_registro_entrada_salida = ?`,
+          [fechaHoraAhora, entradaPrevia[0].id_registro_entrada_salida]
+        );
+        console.log(`✅ Registro de SALIDA actualizado con hora exacta: ${fechaHoraAhora.toLocaleString('es-CO')}`);
+        console.log(`   Fecha entrada: ${entradaPrevia[0].fecha_entrada.toLocaleString('es-CO')}`);
+      } else {
+        // Si no hay entrada previa, crear un nuevo registro con ambas fechas
+        await db.query(
+          `INSERT INTO registros_entrada_salida (id_persona, tipo, fecha_entrada, fecha_salida)
+           VALUES (?, ?, ?, ?)`,
+          [visitanteId, tipoFinal, fechaHoraAhora, fechaHoraAhora]
+        );
+        console.log(`✅ Registro de SALIDA creado con hora exacta: ${fechaHoraAhora.toLocaleString('es-CO')}`);
+      }
     }
     
     console.log(`📝 ${tipoFinal} registrada para visitante ID: ${visitanteId}`);
@@ -738,6 +770,60 @@ router.get('/:id/accesos', async (req, res) => {
   } catch (error) {
     console.error('Error al obtener accesos:', error);
     res.status(500).json({ error: true, message: 'Error al obtener accesos' });
+  }
+});
+
+// Marcar salidas automáticas de visitantes sin salida (cuando el QR expira o después de cierto tiempo)
+router.post('/marcar-salidas-automaticas', async (req, res) => {
+  try {
+    const ahora = new Date();
+    
+    // Buscar todos los visitantes con QR expirado que tienen entrada sin salida
+    const [visitantesSinSalida] = await db.query(`
+      SELECT DISTINCT
+        p.id_persona,
+        p.nombres,
+        p.apellidos,
+        p.documento,
+        p.fecha_expiracion,
+        r.id_registro_entrada_salida,
+        r.fecha_entrada
+      FROM personas p
+      INNER JOIN roles_personas rp ON p.id_rol_persona = rp.id_rol_persona
+      INNER JOIN registros_entrada_salida r ON p.id_persona = r.id_persona
+      WHERE rp.nombre_rol_persona = 'VISITANTE'
+        AND p.estado = 'ACTIVO'
+        AND p.fecha_expiracion < ?
+        AND r.tipo = 'ENTRADA'
+        AND r.fecha_salida IS NULL
+      ORDER BY r.fecha_entrada DESC
+    `, [ahora]);
+    
+    let salidasMarcadas = 0;
+    
+    for (const visitante of visitantesSinSalida) {
+      // Actualizar el registro de entrada con la fecha de salida
+      await db.query(
+        `UPDATE registros_entrada_salida 
+         SET tipo = 'SALIDA', fecha_salida = ?
+         WHERE id_registro_entrada_salida = ?`,
+        [ahora, visitante.id_registro_entrada_salida]
+      );
+      
+      salidasMarcadas++;
+      console.log(`✅ Salida automática marcada para visitante: ${visitante.nombres} ${visitante.apellidos || ''} (${visitante.documento})`);
+      console.log(`   Entrada: ${visitante.fecha_entrada.toLocaleString('es-CO')}`);
+      console.log(`   Salida: ${ahora.toLocaleString('es-CO')}`);
+    }
+    
+    res.json({ 
+      success: true, 
+      mensaje: `Se marcaron ${salidasMarcadas} salidas automáticas`,
+      salidasMarcadas: salidasMarcadas
+    });
+  } catch (error) {
+    console.error('Error al marcar salidas automáticas:', error);
+    res.status(500).json({ error: true, message: 'Error al marcar salidas automáticas: ' + error.message });
   }
 });
 

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -54,11 +54,15 @@ export function GuardView({
     person?: Person;
     codigoQR?: string;
   } | null>(null);
-  const [isRealScanning, setIsRealScanning] = useState(false);
+  // Scanner real activo por defecto para que no haya que presionar el botón de iniciar
+  const [isRealScanning, setIsRealScanning] = useState(true);
+  const [lastScannedCode, setLastScannedCode] = useState<string>('');
+  const [isProcessingScan, setIsProcessingScan] = useState(false);
 
   // Formulario para registro de visitantes
   const [visitorForm, setVisitorForm] = useState({
     nombre: '',
+    apellido: '',
     documento: '',
     tipoDocumento: 'CC' as 'CC' | 'TI' | 'CE',
     tipoSangre: 'O+' as 'O+' | 'O-' | 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-',
@@ -84,23 +88,144 @@ export function GuardView({
     ficha: ''
   });
 
-  // Hook de react-zxing para escaneo QR
+  // Alertar cuando un visitante esté próximo a vencer (2 minutos antes)
+  const warnedVisitorsRef = useRef<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    const checkNearExpiration = () => {
+      const now = new Date();
+      const thresholdMs = 2 * 60 * 1000; // 2 minutos antes de vencer
+      const maxThresholdMs = 2 * 60 * 1000 + 30 * 1000; // 2 minutos y 30 segundos (ventana de alerta)
+
+      visitorQRs.forEach((qr) => {
+        if (qr.estado !== 'ACTIVO') return;
+        
+        const exp = qr.fechaExpiracion;
+        const timeLeft = exp.getTime() - now.getTime();
+
+        // Verificar si está entre 2 minutos y 2 minutos 30 segundos antes de vencer
+        // Esto evita múltiples alertas para el mismo QR
+        if (
+          timeLeft > 0 &&
+          timeLeft <= thresholdMs &&
+          timeLeft > (thresholdMs - 30 * 1000) &&
+          !warnedVisitorsRef.current.has(qr.id)
+        ) {
+          warnedVisitorsRef.current.add(qr.id);
+          const minutosRestantes = Math.floor(timeLeft / 60000);
+          const segundosRestantes = Math.floor((timeLeft % 60000) / 1000);
+          toast.warning('⏰ QR de Visitante Próximo a Vencer', {
+            description: `${qr.visitante.nombre} (${qr.visitante.documento}) - Vence en ${minutosRestantes} min ${segundosRestantes} seg (${exp.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })})`,
+            duration: 10000,
+          });
+        }
+      });
+    };
+
+    // Verificar cada 10 segundos para detectar cuando falta exactamente 2 minutos
+    checkNearExpiration();
+    const interval = setInterval(checkNearExpiration, 10000);
+    return () => clearInterval(interval);
+  }, [visitorQRs]);
+
+  // ============================
+  // Filtros avanzados historial
+  // ============================
+
+  const [historyDesde, setHistoryDesde] = useState<string>('');
+  const [historyHasta, setHistoryHasta] = useState<string>('');
+  const [historyRol, setHistoryRol] = useState<string>('TODOS');
+
+  const parseDate = (value: Date | string | null | undefined): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  const filteredAccessRecords = React.useMemo(() => {
+    return accessRecords.filter((record) => {
+      const baseDate =
+        parseDate(record.fechaHora) ||
+        parseDate(record.timestamp) ||
+        parseDate((record as any).fecha_entrada) ||
+        parseDate((record as any).fecha_salida);
+
+      if (!baseDate) return false;
+
+      let ok = true;
+
+      if (historyDesde) {
+        const desde = new Date(`${historyDesde}T00:00:00`);
+        if (!isNaN(desde.getTime())) {
+          ok = ok && baseDate >= desde;
+        }
+      }
+
+      if (historyHasta) {
+        const hasta = new Date(`${historyHasta}T23:59:59`);
+        if (!isNaN(hasta.getTime())) {
+          ok = ok && baseDate <= hasta;
+        }
+      }
+
+      if (historyRol !== 'TODOS') {
+        ok = ok && record.persona.rol === historyRol;
+      }
+
+      return ok;
+    });
+  }, [accessRecords, historyDesde, historyHasta, historyRol]);
+
+  // Hook de react-zxing para escaneo QR - Optimizado
   const { ref: videoRef } = useZxing({
     onDecodeResult(result) {
       const code = result.getText();
       console.log('✅ QR escaneado:', code);
-      // Detener el scanner
+      
+      // Evitar procesar el mismo código múltiples veces
+      if (code === lastScannedCode || isProcessingScan) {
+        console.log('⚠️ Código ya procesado o en proceso, ignorando...');
+        return;
+      }
+      
+      setLastScannedCode(code);
+      setIsProcessingScan(true);
+      
+      // No detener el scanner inmediatamente, solo pausarlo temporalmente
       setIsRealScanning(false);
+      
       // Procesar el código QR escaneado (async)
-      processQRCode(code).catch(err => {
-        console.error('Error procesando QR:', err);
-        toast.error('Error procesando código QR');
-      });
+      processQRCode(code)
+        .then(() => {
+          // Esperar un momento antes de permitir otro escaneo
+          setTimeout(() => {
+            setIsProcessingScan(false);
+            setLastScannedCode('');
+            setIsRealScanning(true); // Reanudar el scanner
+          }, 2000);
+        })
+        .catch(err => {
+          console.error('Error procesando QR:', err);
+          toast.error('Error procesando código QR');
+          setIsProcessingScan(false);
+          setLastScannedCode('');
+          setIsRealScanning(true); // Reanudar el scanner incluso si hay error
+        });
     },
     onError(error) {
       console.error('Error en el scanner:', error);
+      // No detener el scanner por errores menores
     },
-    paused: !isRealScanning,
+    paused: !isRealScanning || isProcessingScan,
+    constraints: {
+      video: {
+        facingMode: 'environment', // Usar cámara trasera
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    },
+    timeBetweenDecodingAttempts: 100, // Reducir tiempo entre intentos para escaneo más rápido
   });
 
   // Mover processQRCode antes del useEffect que lo usa
@@ -697,15 +822,43 @@ export function GuardView({
     console.log('✅ Persona encontrada en BD. Registrando automáticamente...');
   }, [personas, visitorQRs, accessRecords, onAccessGranted]);
 
-  const startRealScan = () => {
-    setIsScanning(false); // Desactivar simulación
-    setIsRealScanning(true);
-    setScanResult(null);
+  const startRealScan = async () => {
+    try {
+      setIsScanning(false); // Desactivar simulación
+      setIsRealScanning(true);
+      setScanResult(null);
+      setLastScannedCode('');
+      setIsProcessingScan(false);
+      
+      // Solicitar permisos de cámara explícitamente
+      await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        } 
+      });
+      
+      console.log('✅ Cámara iniciada correctamente');
+    } catch (error: any) {
+      console.error('Error al iniciar cámara:', error);
+      setIsRealScanning(false);
+      toast.error(`Error al acceder a la cámara: ${error.message || 'Permisos denegados'}`);
+    }
   };
 
   const stopScan = () => {
     setIsRealScanning(false);
     setIsScanning(false);
+    setIsProcessingScan(false);
+    setLastScannedCode('');
+    
+    // Detener todos los streams de video
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
   };
 
   const formatTime = (date: Date | string | null | undefined) => {
@@ -820,7 +973,7 @@ export function GuardView({
       
       const visitanteResponse = await visitantesAPI.create({
         nombre: visitorForm.nombre,
-        apellido: '',
+        apellido: visitorForm.apellido || '',
         documento: visitorForm.documento,
         tipoDocumento: visitorForm.tipoDocumento,
         tipoSangre: visitorForm.tipoSangre,
@@ -891,6 +1044,7 @@ export function GuardView({
       // 7. Limpiar formulario
       setVisitorForm({
         nombre: '',
+        apellido: '',
         documento: '',
         tipoDocumento: 'CC',
         tipoSangre: 'O+',
@@ -1214,7 +1368,7 @@ export function GuardView({
 
                 {/* Entrada manual */}
                 <div className="space-y-2">
-                  <Label>Entrada Manual de Documento:</Label>
+                  <Label>Ingreso y Salida Manual de Documento:</Label>
                   <div className="flex gap-2">
                     <Input
                       type="text"
@@ -1224,7 +1378,7 @@ export function GuardView({
                       onKeyPress={(e) => e.key === 'Enter' && handleManualEntry()}
                     />
                     <Button onClick={handleManualEntry} variant="outline">
-                      Verificar
+                      Ingreso y Salida Manual
                     </Button>
                   </div>
                 </div>
@@ -1346,14 +1500,25 @@ export function GuardView({
               <form onSubmit={handleVisitorRegistration} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="vis-nombre">Nombre Completo</Label>
+                    <Label htmlFor="vis-nombre">Nombre</Label>
                     <Input
                       id="vis-nombre"
                       type="text"
-                      placeholder="Nombre completo del visitante"
+                      placeholder="Nombre del visitante"
                       value={visitorForm.nombre}
                       onChange={(e) => setVisitorForm({...visitorForm, nombre: e.target.value})}
                       required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="vis-apellido">Apellido</Label>
+                    <Input
+                      id="vis-apellido"
+                      type="text"
+                      placeholder="Apellido del visitante"
+                      value={visitorForm.apellido}
+                      onChange={(e) => setVisitorForm({...visitorForm, apellido: e.target.value})}
                     />
                   </div>
 
@@ -1531,36 +1696,110 @@ export function GuardView({
             </Card>
           </div>
 
-          {/* Accesos recientes */}
+          {/* Historial de accesos con filtros avanzados */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Clock className="h-5 w-5" />
-                Accesos Recientes del Turno
+                Historial de Accesos del Turno
               </CardTitle>
               <CardDescription>
-                Últimos registros procesados (en tiempo real)
+                Filtre por rango de fechas y rol para investigar accesos
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {/* Filtros avanzados */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <Label htmlFor="hist-desde">Fecha desde</Label>
+                  <Input
+                    id="hist-desde"
+                    type="date"
+                    value={historyDesde}
+                    onChange={(e) => setHistoryDesde(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="hist-hasta">Fecha hasta</Label>
+                  <Input
+                    id="hist-hasta"
+                    type="date"
+                    value={historyHasta}
+                    onChange={(e) => setHistoryHasta(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="hist-rol">Rol</Label>
+                  <select
+                    id="hist-rol"
+                    value={historyRol}
+                    onChange={(e) => setHistoryRol(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="TODOS">Todos</option>
+                    <option value="ESTUDIANTE">Aprendiz</option>
+                    <option value="INSTRUCTOR">Instructor</option>
+                    <option value="ADMINISTRATIVO">Administrativo</option>
+                    <option value="VISITANTE">Visitante</option>
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setHistoryDesde('');
+                      setHistoryHasta('');
+                      setHistoryRol('TODOS');
+                    }}
+                  >
+                    Limpiar filtros
+                  </Button>
+                </div>
+              </div>
+
+              {/* Lista */}
               <div className="space-y-4">
-                {accessRecords.length > 0 ? (
-                  accessRecords.slice(0, 10).map((record) => {
+                {filteredAccessRecords.length > 0 ? (
+                  filteredAccessRecords.slice(0, 50).map((record) => {
                     const qrAsociado = record.persona.rol === 'VISITANTE' 
                       ? visitorQRs.find(qr => qr.codigoQR === record.codigoQR)
                       : null;
                     // Manejar fechas DATE del backend (fecha_entrada o fecha_salida)
                     let timestamp: Date | string | null = null;
+                    let fechaEntrada: Date | string | null = null;
+                    let fechaSalida: Date | string | null = null;
+                    
                     if (record.timestamp) {
                       timestamp = record.timestamp;
                     } else if (record.fechaHora) {
                       timestamp = record.fechaHora;
-                    } else if ((record as any).fecha_entrada) {
-                      timestamp = (record as any).fecha_entrada;
-                    } else if ((record as any).fecha_salida) {
-                      timestamp = (record as any).fecha_salida;
+                    } else if (record.fecha_entrada) {
+                      timestamp = record.fecha_entrada;
+                    } else if (record.fecha_salida) {
+                      timestamp = record.fecha_salida;
                     } else {
                       timestamp = new Date();
+                    }
+                    
+                    // Obtener fecha_entrada y fecha_salida si existen
+                    if (record.fecha_entrada) {
+                      fechaEntrada = record.fecha_entrada;
+                    }
+                    if (record.fecha_salida) {
+                      fechaSalida = record.fecha_salida;
+                    }
+                    
+                    // Convertir strings a Date si es necesario
+                    if (typeof fechaEntrada === 'string') {
+                      fechaEntrada = new Date(fechaEntrada);
+                    }
+                    if (typeof fechaSalida === 'string') {
+                      fechaSalida = new Date(fechaSalida);
+                    }
+                    if (typeof timestamp === 'string') {
+                      timestamp = new Date(timestamp);
                     }
                     
                     return (
@@ -1569,7 +1808,7 @@ export function GuardView({
                           <div className="flex items-center gap-2">
                             {getRolIcon(record.persona.rol)}
                             <div>
-                              <p className="font-medium">{record.persona.nombre}</p>
+                              <p className="font-medium">{record.persona.nombre} {record.persona.apellido || ''}</p>
                               <p className="text-sm text-muted-foreground">
                                 {record.persona.documento} • {record.persona.rol === 'ESTUDIANTE' ? 'APRENDIZ' : record.persona.rol}
                               </p>
@@ -1578,6 +1817,21 @@ export function GuardView({
                                   <AlertCircle className="h-3 w-3" />
                                   QR vence: {formatDateTime(qrAsociado.fechaExpiracion)}
                                 </p>
+                              )}
+                              {/* Mostrar horas de entrada y salida para visitantes */}
+                              {record.persona.rol === 'VISITANTE' && (
+                                <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                                  {fechaEntrada ? (
+                                    <p className="text-green-600">🟢 Entrada: {formatTime(fechaEntrada)} - {formatDate(fechaEntrada)}</p>
+                                  ) : (
+                                    <p className="text-gray-400">🟢 Entrada: No registrada</p>
+                                  )}
+                                  {fechaSalida ? (
+                                    <p className="text-orange-600">🔴 Salida: {formatTime(fechaSalida)} - {formatDate(fechaSalida)}</p>
+                                  ) : (
+                                    <p className="text-gray-400">🔴 Salida: Pendiente (se marcará automáticamente al expirar el QR)</p>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </div>
@@ -1599,7 +1853,7 @@ export function GuardView({
                   })
                 ) : (
                   <p className="text-center text-muted-foreground py-4">
-                    No hay registros de acceso recientes
+                    No hay registros que coincidan con los filtros
                   </p>
                 )}
               </div>

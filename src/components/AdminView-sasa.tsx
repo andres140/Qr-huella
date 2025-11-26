@@ -19,7 +19,11 @@ import {
   QrCode,
   UserCog,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Users,
+  GraduationCap,
+  Shield,
+  Calendar
 } from 'lucide-react';
 
 import { Person, AccessRecord, AccessStats, User, VisitorQR } from '../types';
@@ -74,12 +78,14 @@ export function AdminView({
   // Estado y handler para el formulario completo de visitantes (Card adicional solicitado)
   const [visitorForm, setVisitorForm] = useState<{
     nombre: string;
+    apellido: string;
     documento: string;
     tipoDocumento: Person['tipoDocumento'];
     tipoSangre: Person['tipoSangre'];
     motivo: string;
   }>({
     nombre: '',
+    apellido: '',
     documento: '',
     tipoDocumento: 'CC',
     tipoSangre: 'O+',
@@ -97,7 +103,7 @@ export function AdminView({
     const person: Person = {
       id: Date.now().toString(),
       nombre: visitorForm.nombre.trim(),
-      apellido: '',
+      apellido: visitorForm.apellido.trim() || '',
       documento: visitorForm.documento.trim(),
       tipoDocumento: visitorForm.tipoDocumento,
       programa: undefined,
@@ -134,7 +140,7 @@ export function AdminView({
     }
 
     // limpiar formulario
-    setVisitorForm({ nombre: '', documento: '', tipoDocumento: 'CC', tipoSangre: 'O+', motivo: '' });
+    setVisitorForm({ nombre: '', apellido: '', documento: '', tipoDocumento: 'CC', tipoSangre: 'O+', motivo: '' });
   };
 
   const formatTime = (date: Date) => {
@@ -169,11 +175,24 @@ export function AdminView({
 
   // Monitorear QRs expirados y mostrar alertas mejoradas
   useEffect(() => {
+    // Cargar QRs ya notificados desde localStorage para evitar alertas en la primera carga
+    const savedNotifiedQRs = localStorage.getItem('notifiedExpiredQRs');
+    if (savedNotifiedQRs) {
+      try {
+        const parsed = JSON.parse(savedNotifiedQRs);
+        parsed.forEach((id: string) => notifiedQRs.current.add(id));
+      } catch (e) {
+        console.error('Error loading notified QRs:', e);
+      }
+    }
+
     const checkExpiredQRs = () => {
       const now = new Date();
       visitorQRs.forEach(qr => {
         if (qr.fechaExpiracion <= now && qr.estado === 'ACTIVO' && !notifiedQRs.current.has(qr.id)) {
           notifiedQRs.current.add(qr.id);
+          // Guardar en localStorage
+          localStorage.setItem('notifiedExpiredQRs', JSON.stringify(Array.from(notifiedQRs.current)));
           toast.warning('⚠️ QR de Visitante Expirado', {
             description: `${qr.visitante.nombre} (${qr.visitante.documento}) - Expiró el ${formatDateTime(qr.fechaExpiracion)}`,
             duration: 7000,
@@ -182,40 +201,47 @@ export function AdminView({
       });
     };
 
-    // Verificar inmediatamente
-    checkExpiredQRs();
-
+    // No verificar inmediatamente en la primera carga, solo en intervalos
     // Verificar cada minuto
     const interval = setInterval(checkExpiredQRs, 60000);
 
     return () => clearInterval(interval);
   }, [visitorQRs]);
 
-  // Monitorear nuevos visitantes
+  // Monitorear nuevos visitantes (solo notificar si hay cambios reales, no en la primera carga)
   useEffect(() => {
+    // Solo ejecutar si ya hay un valor previo guardado (no es la primera carga)
     const lastQRId = localStorage.getItem('lastVisitorQRNotified');
+    const isFirstLoad = lastQRId === null;
     
-    if (visitorQRs.length > 0) {
+    if (visitorQRs.length > 0 && !isFirstLoad) {
       const latestQR = visitantesOrdenados[0];
       
-      if (lastQRId !== latestQR.id) {
+      // Solo notificar si el QR más reciente es diferente al último notificado
+      if (latestQR && lastQRId !== latestQR.id) {
         localStorage.setItem('lastVisitorQRNotified', latestQR.id);
-        
-        // No notificar en la primera carga
-        if (lastQRId !== null) {
-          toast.success('✅ Nuevo Visitante Registrado', {
-            description: `${latestQR.visitante.nombre} - QR válido hasta ${formatDateTime(latestQR.fechaExpiracion)}`,
-            duration: 6000,
-          });
-        }
+        toast.success('✅ Nuevo Visitante Registrado', {
+          description: `${latestQR.visitante.nombre} - QR válido hasta ${formatDateTime(latestQR.fechaExpiracion)}`,
+          duration: 6000,
+        });
+      }
+    } else if (visitorQRs.length > 0 && isFirstLoad) {
+      // En la primera carga, solo guardar el ID sin notificar
+      const latestQR = visitantesOrdenados[0];
+      if (latestQR) {
+        localStorage.setItem('lastVisitorQRNotified', latestQR.id);
       }
     }
   }, [visitorQRs, visitantesOrdenados]);
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="users" className="space-y-6">
+      <Tabs defaultValue="dashboard" className="space-y-6">
         <TabsList className="flex w-full items-center gap-2 overflow-x-auto">
+          <TabsTrigger value="dashboard" className="flex items-center gap-2">
+            <Calendar className="h-4 w-4" />
+            Dashboard
+          </TabsTrigger>
           <TabsTrigger value="users" className="flex items-center gap-2">
             <UserCog className="h-4 w-4" />
             Usuarios
@@ -234,7 +260,80 @@ export function AdminView({
           </TabsTrigger>
         </TabsList>
 
-        {/* Nota: pestaña 'Dashboard' eliminada por petición */}
+        {/* Dashboard */}
+        <TabsContent value="dashboard" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Personas Dentro</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.totalPersonasDentro}</div>
+                <p className="text-xs text-muted-foreground">Total en instalaciones</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Accesos Hoy</CardTitle>
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.accesosDia}</div>
+                <p className="text-xs text-muted-foreground">Entradas y salidas</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Aprendices</CardTitle>
+                <GraduationCap className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.estudiantesDentro}</div>
+                <p className="text-xs text-muted-foreground">Actualmente dentro</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Visitantes</CardTitle>
+                <QrCode className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.visitantesDentro}</div>
+                <p className="text-xs text-muted-foreground">Con QR activo dentro</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Personal</CardTitle>
+                <Shield className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {stats.instructoresDentro + stats.administrativosDentro}
+                </div>
+                <p className="text-xs text-muted-foreground">Instructores y administrativos</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Registrados</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{personas.length}</div>
+                <p className="text-xs text-muted-foreground">Personas en el sistema</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
         {/* Gestión de Usuarios del Sistema */}
         <TabsContent value="users" className="space-y-6">
@@ -452,14 +551,25 @@ export function AdminView({
               <form onSubmit={handleVisitorRegistration} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="vis-nombre">Nombre Completo</Label>
+                    <Label htmlFor="vis-nombre">Nombre</Label>
                     <Input
                       id="vis-nombre"
                       type="text"
-                      placeholder="Nombre completo del visitante"
+                      placeholder="Nombre del visitante"
                       value={visitorForm.nombre}
                       onChange={(e) => setVisitorForm({...visitorForm, nombre: e.target.value})}
                       required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="vis-apellido">Apellido</Label>
+                    <Input
+                      id="vis-apellido"
+                      type="text"
+                      placeholder="Apellido del visitante"
+                      value={visitorForm.apellido}
+                      onChange={(e) => setVisitorForm({...visitorForm, apellido: e.target.value})}
                     />
                   </div>
 
@@ -477,38 +587,44 @@ export function AdminView({
 
                   <div className="space-y-2">
                     <Label htmlFor="vis-tipoDoc">Tipo de Documento</Label>
-                    <select
-                      id="vis-tipoDoc"
-                      value={visitorForm.tipoDocumento}
-                      onChange={(e) => setVisitorForm({...visitorForm, tipoDocumento: e.target.value as 'CC' | 'TI' | 'CE' | 'PASAPORTE'})}
-                      className="w-full p-2 border border-gray-300 rounded-md"
+                    <Select 
+                      value={visitorForm.tipoDocumento} 
+                      onValueChange={(v: string) => setVisitorForm({...visitorForm, tipoDocumento: v as 'CC' | 'TI' | 'CE' | 'PASAPORTE'})}
                       required
                     >
-                      <option value="CC">Cédula de Ciudadanía</option>
-                      <option value="TI">Tarjeta de Identidad</option>
-                      <option value="CE">Cédula de Extranjería</option>
-                      <option value="PASAPORTE">Pasaporte</option>
-                    </select>
+                      <SelectTrigger id="vis-tipoDoc">
+                        <SelectValue placeholder="Seleccione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CC">Cédula de Ciudadanía</SelectItem>
+                        <SelectItem value="TI">Tarjeta de Identidad</SelectItem>
+                        <SelectItem value="CE">Cédula de Extranjería</SelectItem>
+                        <SelectItem value="PASAPORTE">Pasaporte</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="vis-tipoSangre">Tipo de Sangre</Label>
-                    <select
-                      id="vis-tipoSangre"
-                      value={visitorForm.tipoSangre}
-                      onChange={(e) => setVisitorForm({...visitorForm, tipoSangre: e.target.value as Person['tipoSangre']})}
-                      className="w-full p-2 border border-gray-300 rounded-md"
+                    <Select 
+                      value={visitorForm.tipoSangre} 
+                      onValueChange={(v: string) => setVisitorForm({...visitorForm, tipoSangre: v as Person['tipoSangre']})}
                       required
                     >
-                      <option value="O+">O+</option>
-                      <option value="O-">O-</option>
-                      <option value="A+">A+</option>
-                      <option value="A-">A-</option>
-                      <option value="B+">B+</option>
-                      <option value="B-">B-</option>
-                      <option value="AB+">AB+</option>
-                      <option value="AB-">AB-</option>
-                    </select>
+                      <SelectTrigger id="vis-tipoSangre">
+                        <SelectValue placeholder="Seleccione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="O+">O+</SelectItem>
+                        <SelectItem value="O-">O-</SelectItem>
+                        <SelectItem value="A+">A+</SelectItem>
+                        <SelectItem value="A-">A-</SelectItem>
+                        <SelectItem value="B+">B+</SelectItem>
+                        <SelectItem value="B-">B-</SelectItem>
+                        <SelectItem value="AB+">AB+</SelectItem>
+                        <SelectItem value="AB-">AB-</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2 md:col-span-2">

@@ -16,7 +16,8 @@ import {
   Upload,
   X,
   FileSpreadsheet,
-  File
+  File,
+  GraduationCap
 } from 'lucide-react';
 import { Person, AccessRecord, AccessStats, User } from '../types';
 
@@ -46,14 +47,52 @@ export function ReportExporter({
     estado: string;
   }>>([]);
 
-  const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat('es-CO', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
+  const formatDate = (date: Date | string | null | undefined) => {
+    if (!date) return '--/--/----';
+    try {
+      const dateObj = typeof date === 'string' ? new Date(date) : date;
+      if (isNaN(dateObj.getTime())) return '--/--/----';
+      return new Intl.DateTimeFormat('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }).format(dateObj);
+    } catch (error) {
+      return '--/--/----';
+    }
+  };
+
+  const formatTime = (date: Date | string | null | undefined) => {
+    if (!date) return '--:--:--';
+    try {
+      const dateObj = typeof date === 'string' ? new Date(date) : date;
+      if (isNaN(dateObj.getTime())) return '--:--:--';
+      return new Intl.DateTimeFormat('es-CO', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }).format(dateObj);
+    } catch (error) {
+      return '--:--:--';
+    }
+  };
+
+  const formatDateOnly = (date: Date | string | null | undefined) => {
+    if (!date) return '--/--/----';
+    try {
+      const dateObj = typeof date === 'string' ? new Date(date) : date;
+      if (isNaN(dateObj.getTime())) return '--/--/----';
+      return new Intl.DateTimeFormat('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      }).format(dateObj);
+    } catch (error) {
+      return '--/--/----';
+    }
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -413,25 +452,65 @@ export function ReportExporter({
           contenido = 'REPORTE DE ACCESOS DEL DÍA\n';
           contenido += `Fecha: ${formatDate(now)}\n`;
           contenido += `Total de Accesos: ${accesosDia.length}\n\n`;
-          contenido += 'Hora,Tipo,Nombre,Documento,Rol,Ubicación\n';
+          contenido += 'Fecha y Hora,Hora Entrada,Hora Salida,Tipo,Nombre,Documento,Rol,Ubicación\n';
           accesosDia.forEach(acc => {
-            const ts = acc.timestamp || acc.fechaHora || new Date();
-            contenido += `"${formatDate(ts)}","${acc.tipo}","${acc.persona.nombre}","${acc.persona.documento}","${acc.persona.rol === 'ESTUDIANTE' ? 'APRENDIZ' : acc.persona.rol}","${acc.ubicacion}"\n`;
+            // Usar fecha_entrada y fecha_salida si están disponibles, sino usar timestamp/fechaHora según el tipo
+            let fechaEntrada: Date | string | null = null;
+            let fechaSalida: Date | string | null = null;
+            
+            if ((acc as any).fecha_entrada) {
+              fechaEntrada = (acc as any).fecha_entrada instanceof Date ? (acc as any).fecha_entrada : new Date((acc as any).fecha_entrada);
+            } else if (acc.tipo === 'ENTRADA') {
+              fechaEntrada = acc.timestamp || acc.fechaHora || new Date();
+            }
+            
+            if ((acc as any).fecha_salida) {
+              fechaSalida = (acc as any).fecha_salida instanceof Date ? (acc as any).fecha_salida : new Date((acc as any).fecha_salida);
+            } else if (acc.tipo === 'SALIDA') {
+              fechaSalida = acc.timestamp || acc.fechaHora || new Date();
+            }
+            
+            const horaEntrada = fechaEntrada ? formatTime(fechaEntrada) : '--:--:--';
+            const horaSalida = fechaSalida ? formatTime(fechaSalida) : '--:--:--';
+            const fechaCompleta = fechaEntrada || fechaSalida || acc.timestamp || acc.fechaHora || new Date();
+            const fechaHoraCompleta = formatDate(fechaCompleta);
+            
+            contenido += `"${fechaHoraCompleta}","${horaEntrada}","${horaSalida}","${acc.tipo}","${acc.persona.nombre}","${acc.persona.documento}","${acc.persona.rol === 'ESTUDIANTE' ? 'APRENDIZ' : acc.persona.rol}","${acc.ubicacion}"\n`;
           });
         } else {
-          contenido = `╔════════════════════════════════════════════════════════════════╗\n`;
-          contenido += `║         SENA - REPORTE DE ACCESOS DEL DÍA                     ║\n`;
-          contenido += `╚════════════════════════════════════════════════════════════════╝\n\n`;
+          contenido = `╔════════════════════════════════════════════════════════════════════════════════════════╗\n`;
+          contenido += `║                    SENA - REPORTE DE ACCESOS DEL DÍA                                ║\n`;
+          contenido += `╚════════════════════════════════════════════════════════════════════════════════════════╝\n\n`;
           contenido += `Fecha: ${formatDate(now)}\n`;
           contenido += `Total de Accesos: ${accesosDia.length}\n\n`;
-          contenido += `${'─'.repeat(100)}\n`;
-          contenido += `HORA          | TIPO    | NOMBRE                 | DOCUMENTO   | ROL\n`;
-          contenido += `${'─'.repeat(100)}\n`;
+          contenido += `${'─'.repeat(140)}\n`;
+          contenido += `FECHA Y HORA        | HORA ENTRADA  | HORA SALIDA   | TIPO    | NOMBRE                 | DOCUMENTO   | ROL\n`;
+          contenido += `${'─'.repeat(140)}\n`;
           accesosDia.forEach(acc => {
-            const ts = acc.timestamp || acc.fechaHora || new Date();
-            contenido += `${formatDate(ts).padEnd(13)} | ${acc.tipo.padEnd(7)} | ${acc.persona.nombre.padEnd(22).substring(0, 22)} | ${acc.persona.documento.padEnd(11)} | ${(acc.persona.rol === 'ESTUDIANTE' ? 'APRENDIZ' : acc.persona.rol)}\n`;
+            // Usar fecha_entrada y fecha_salida si están disponibles, sino usar timestamp/fechaHora según el tipo
+            let fechaEntrada: Date | string | null = null;
+            let fechaSalida: Date | string | null = null;
+            
+            if ((acc as any).fecha_entrada) {
+              fechaEntrada = (acc as any).fecha_entrada instanceof Date ? (acc as any).fecha_entrada : new Date((acc as any).fecha_entrada);
+            } else if (acc.tipo === 'ENTRADA') {
+              fechaEntrada = acc.timestamp || acc.fechaHora || new Date();
+            }
+            
+            if ((acc as any).fecha_salida) {
+              fechaSalida = (acc as any).fecha_salida instanceof Date ? (acc as any).fecha_salida : new Date((acc as any).fecha_salida);
+            } else if (acc.tipo === 'SALIDA') {
+              fechaSalida = acc.timestamp || acc.fechaHora || new Date();
+            }
+            
+            const horaEntrada = fechaEntrada ? formatTime(fechaEntrada) : '--:--:--';
+            const horaSalida = fechaSalida ? formatTime(fechaSalida) : '--:--:--';
+            const fechaCompleta = fechaEntrada || fechaSalida || acc.timestamp || acc.fechaHora || new Date();
+            const fechaHoraCompleta = formatDate(fechaCompleta);
+            
+            contenido += `${fechaHoraCompleta.padEnd(19)} | ${horaEntrada.padEnd(13)} | ${horaSalida.padEnd(13)} | ${acc.tipo.padEnd(7)} | ${acc.persona.nombre.padEnd(22).substring(0, 22)} | ${acc.persona.documento.padEnd(11)} | ${(acc.persona.rol === 'ESTUDIANTE' ? 'APRENDIZ' : acc.persona.rol)}\n`;
           });
-          contenido += `${'─'.repeat(100)}\n`;
+          contenido += `${'─'.repeat(120)}\n`;
         }
       } else if (tipo === 'personas-dentro') {
         const personasDentro = accessRecords
@@ -522,9 +601,108 @@ export function ReportExporter({
         contenido = `Reporte ${tipo} - Generado el ${formatDate(now)}`;
       }
       
-      const mimeType = formato === 'PDF' ? 'application/pdf;charset=utf-8' : 'text/csv;charset=utf-8';
-      const extension = formato === 'PDF' ? 'txt' : 'csv';
-      const blob = new Blob(['\uFEFF' + contenido], { type: mimeType });
+      // Ajustar tipos y extensiones para que la descarga sea correcta
+      // Para PDF generamos HTML que se puede imprimir como PDF o guardar como PDF
+      let mimeType: string;
+      let extension: string;
+      let blobContent: string | BlobPart[];
+      
+      if (formato === 'PDF') {
+        // Generar HTML que se puede imprimir como PDF
+        // Escapar caracteres HTML especiales en el contenido
+        const contenidoEscapado = contenido
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+        
+        const tituloReporte = tipo === 'juicios-evaluativos' 
+          ? 'REPORTE DE JUICIOS EVALUATIVOS'
+          : tipo === 'accesos-dia'
+          ? 'REPORTE DE ACCESOS DEL DÍA'
+          : tipo === 'visitantes'
+          ? 'REPORTE DE VISITANTES'
+          : tipo === 'estadisticas-uso'
+          ? 'ESTADÍSTICAS DE USO DEL SISTEMA'
+          : 'REPORTE SENA';
+        
+        const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Reporte SENA - ${tituloReporte}</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      font-size: 10pt;
+      margin: 20px;
+      line-height: 1.4;
+      color: #000;
+    }
+    .header {
+      text-align: center;
+      border: 2px solid #000;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 14pt;
+      font-weight: bold;
+    }
+    .info {
+      margin-bottom: 15px;
+    }
+    .info p {
+      margin: 5px 0;
+    }
+    pre {
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+      font-size: 9pt;
+      line-height: 1.3;
+      margin: 0;
+    }
+    .footer {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 8pt;
+      border-top: 1px solid #000;
+      padding-top: 10px;
+    }
+    @media print {
+      body { margin: 10px; }
+      @page {
+        margin: 1cm;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>SENA - ${tituloReporte}</h1>
+  </div>
+  <div class="info">
+    <p><strong>Fecha de Generación:</strong> ${formatDate(now)}</p>
+    <p><strong>Generado por:</strong> ${currentUser.nombre}</p>
+  </div>
+  <pre>${contenidoEscapado}</pre>
+  <div class="footer">
+    <p>Fin del reporte</p>
+  </div>
+</body>
+</html>`;
+        mimeType = 'text/html;charset=utf-8';
+        extension = 'html';
+        blobContent = [htmlContent];
+      } else {
+        mimeType = 'text/csv;charset=utf-8';
+        extension = 'csv';
+        blobContent = ['\uFEFF' + contenido];
+      }
+      
+      const blob = new Blob(blobContent, { type: mimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -553,12 +731,6 @@ export function ReportExporter({
       nombre: 'Accesos del Día',
       descripcion: 'Todos los accesos registrados hoy',
       icon: Calendar
-    },
-    {
-      id: 'personas-dentro',
-      nombre: 'Personas Dentro',
-      descripcion: 'Listado de personas actualmente en la institución',
-      icon: Users
     },
     {
       id: 'estadisticas-uso',
@@ -675,7 +847,159 @@ export function ReportExporter({
         </CardContent>
       </Card>
 
-      {/* Tipos de reportes disponibles (ocultados por petición) */}
+      {/* Sección de descarga de datos de la Base de Datos */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Download className="h-5 w-5" />
+            Aprendices Registrados en el Sistema
+          </CardTitle>
+          <CardDescription>
+            Descargue el listado de aprendices registrados en formato PDF o Excel
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
+            <div>
+              <p className="text-sm font-medium">Total de aprendices registrados</p>
+              <p className="text-2xl font-bold mt-1">{personas.filter(p => p.rol === 'ESTUDIANTE').length}</p>
+            </div>
+            <GraduationCap className="h-8 w-8 text-muted-foreground" />
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button
+              onClick={() => generateReport('juicios-evaluativos', 'PDF')}
+              variant="default"
+              className="flex-1"
+              disabled={isGenerating === 'juicios-evaluativos_PDF'}
+            >
+              {isGenerating === 'juicios-evaluativos_PDF' ? (
+                <>
+                  <Clock className="h-4 w-4 mr-2 animate-spin" />
+                  Generando...
+                </>
+              ) : (
+                <>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Descargar PDF
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={() => generateReport('juicios-evaluativos', 'Excel')}
+              variant="outline"
+              className="flex-1"
+              disabled={isGenerating === 'juicios-evaluativos_Excel'}
+            >
+              {isGenerating === 'juicios-evaluativos_Excel' ? (
+                <>
+                  <Clock className="h-4 w-4 mr-2 animate-spin" />
+                  Generando...
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Descargar Excel
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Sección de descarga de datos cargados (si hay datos cargados) */}
+      {juiciosData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              Descargar Datos Cargados
+            </CardTitle>
+            <CardDescription>
+              Descargue los datos del archivo cargado en formato PDF o Excel
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                onClick={() => {
+                  const now = new Date();
+                  let contenido = `╔════════════════════════════════════════════════════════════════╗\n`;
+                  contenido += `║         SENA - REPORTE DE JUICIOS EVALUATIVOS                 ║\n`;
+                  contenido += `╚════════════════════════════════════════════════════════════════╝\n\n`;
+                  contenido += `Fecha de Generación: ${formatDate(now)}\n`;
+                  contenido += `Generado por: ${currentUser.nombre}\n`;
+                  contenido += `Total de Aprendices: ${juiciosData.length}\n\n`;
+                  contenido += `${'─'.repeat(100)}\n`;
+                  contenido += `FICHA    | TIPO DOC | NÚMERO DOC  | NOMBRE                    | APELLIDO                 | ESTADO\n`;
+                  contenido += `${'─'.repeat(100)}\n`;
+                  juiciosData.forEach(dato => {
+                    contenido += `${dato.ficha.padEnd(8)} | ${dato.tipoDocumento.padEnd(8)} | ${dato.numeroDocumento.padEnd(11)} | ${dato.nombre.padEnd(25).substring(0, 25)} | ${dato.apellido.padEnd(24).substring(0, 24)} | ${dato.estado}\n`;
+                  });
+                  contenido += `${'─'.repeat(100)}\n\n`;
+                  contenido += `Fin del reporte\n`;
+                  
+                  const blob = new Blob(['\uFEFF' + contenido], { type: 'text/plain;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `SENA_Juicios_Evaluativos_${now.toISOString().split('T')[0]}.txt`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  
+                  toast.success('✅ Reporte PDF Descargado', {
+                    description: 'El archivo se ha descargado exitosamente',
+                    duration: 3000,
+                  });
+                }}
+                className="flex-1"
+                variant="outline"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Descargar PDF
+              </Button>
+              <Button
+                onClick={() => {
+                  const now = new Date();
+                  let contenido = 'REPORTE DE JUICIOS EVALUATIVOS\n';
+                  contenido += `Generado el: ${formatDate(now)}\n`;
+                  contenido += `Total de Aprendices: ${juiciosData.length}\n\n`;
+                  contenido += 'Ficha,Tipo Documento,Número Documento,Nombre,Apellido,Estado\n';
+                  juiciosData.forEach(dato => {
+                    contenido += `"${dato.ficha}","${dato.tipoDocumento}","${dato.numeroDocumento}","${dato.nombre}","${dato.apellido}","${dato.estado}"\n`;
+                  });
+                  
+                  const blob = new Blob(['\uFEFF' + contenido], { type: 'text/csv;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `SENA_Juicios_Evaluativos_${now.toISOString().split('T')[0]}.csv`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  
+                  toast.success('✅ Reporte Excel Descargado', {
+                    description: 'El archivo CSV se ha descargado exitosamente',
+                    duration: 3000,
+                  });
+                }}
+                className="flex-1"
+                variant="outline"
+              >
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Descargar Excel (CSV)
+              </Button>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              <p>Total de registros del archivo cargado: <strong>{juiciosData.length}</strong></p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

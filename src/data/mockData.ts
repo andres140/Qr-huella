@@ -17,7 +17,8 @@ export const generateMockVisitorQRs = (): VisitorQR[] => {
 
 export const calculateAccessStats = (
   personas: Person[], 
-  accessRecords: AccessRecord[]
+  accessRecords: AccessRecord[],
+  visitorQRs: VisitorQR[] = []
 ): AccessStats => {
   // Obtener registros de hoy
   const today = new Date();
@@ -74,6 +75,35 @@ export const calculateAccessStats = (
         case 'VISITANTE':
           visitantesDentro++;
           break;
+      }
+    }
+  });
+  
+  // Contar visitantes con QR activo que están dentro
+  const ahora = new Date();
+  visitorQRs.forEach(qr => {
+    // Verificar si el QR está activo y no expirado
+    const qrActivo = qr.estado === 'ACTIVO' && qr.fechaExpiracion >= ahora;
+    
+    if (qrActivo) {
+      // Verificar si el visitante tiene un registro de entrada sin salida correspondiente
+      const visitanteRecords = accessRecords
+        .filter(record => record.personaId === qr.visitante.id)
+        .sort((a, b) => {
+          const dateA = a.timestamp || a.fechaHora || new Date(0);
+          const dateB = b.timestamp || b.fechaHora || new Date(0);
+          return dateB.getTime() - dateA.getTime();
+        });
+      
+      if (visitanteRecords.length > 0) {
+        const lastRecord = visitanteRecords[0];
+        if (lastRecord.tipo === 'ENTRADA') {
+          // Verificar que no haya una salida posterior
+          visitantesDentro++;
+        }
+      } else {
+        // Si tiene QR activo pero no tiene registros, podría estar dentro (depende de la lógica del negocio)
+        // Por ahora, solo contamos si tiene registro de entrada
       }
     }
   });

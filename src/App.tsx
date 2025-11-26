@@ -129,28 +129,40 @@ export default function App() {
         const response = await entradasSalidasAPI.getHoy();
         if (response.success && response.data) {
           // Convertir registros del backend a formato AccessRecord
-          const registrosAsAccessRecords: AccessRecord[] = response.data.map((r: any) => ({
-            id: r.id,
-            personaId: r.aprendizId,
-            persona: personas.find(p => p.id === r.aprendizId) || {
-              id: r.aprendizId,
-              nombre: r.nombre,
-              apellido: r.apellido || '',
-              documento: r.documento,
-              tipoDocumento: 'CC',
-              programa: r.programa || '',
-              ficha: r.ficha || '',
-              rol: 'ESTUDIANTE',
-              estado: 'ACTIVO',
-              tipoSangre: 'O+',
-              foto: null,
-            },
-            tipo: r.tipo,
-          timestamp: new Date(r.timestamp),
-            fechaHora: new Date(r.timestamp),
-            ubicacion: r.ubicacion,
-            codigoQR: r.codigoQR || '',
-        }));
+          const registrosAsAccessRecords: AccessRecord[] = response.data.map((r: any) => {
+            // Determinar timestamp: usar fecha_entrada o fecha_salida si están disponibles
+            let timestamp = r.timestamp;
+            if (r.fecha_entrada) {
+              timestamp = r.fecha_entrada;
+            } else if (r.fecha_salida) {
+              timestamp = r.fecha_salida;
+            }
+            
+            return {
+              id: r.id,
+              personaId: r.personaId || r.aprendizId,
+              persona: personas.find(p => p.id === (r.personaId || r.aprendizId)) || {
+                id: r.personaId || r.aprendizId,
+                nombre: r.nombres || r.nombre || 'Sin nombre',
+                apellido: r.apellidos || r.apellido || '',
+                documento: r.documento,
+                tipoDocumento: r.tipo_documento || 'CC',
+                programa: r.programa || '',
+                ficha: r.ficha || '',
+                rol: 'ESTUDIANTE',
+                estado: 'ACTIVO',
+                tipoSangre: 'O+',
+                foto: null,
+              },
+              tipo: r.tipo,
+              timestamp: timestamp ? new Date(timestamp) : new Date(),
+              fechaHora: timestamp ? new Date(timestamp) : new Date(),
+              ubicacion: r.ubicacion || 'Entrada Principal',
+              codigoQR: r.codigoQR || r.codigo_qr || '',
+              fecha_entrada: r.fecha_entrada ? new Date(r.fecha_entrada) : undefined,
+              fecha_salida: r.fecha_salida ? new Date(r.fecha_salida) : undefined,
+            };
+          });
           setAccessRecords(registrosAsAccessRecords);
         }
       } catch (error) {
@@ -204,9 +216,9 @@ export default function App() {
 
   // Recalcular estadísticas cuando cambien los registros
   useEffect(() => {
-    const newStats = calculateAccessStats(personas, accessRecords);
+    const newStats = calculateAccessStats(personas, accessRecords, visitorQRs);
     setStats(newStats);
-  }, [personas, accessRecords]);
+  }, [personas, accessRecords, visitorQRs]);
 
   const handleLogin = (userData: User) => {
     setUser(userData);
@@ -302,20 +314,22 @@ export default function App() {
         if (response.success && response.data) {
           const registroBD = response.data;
           
-          // El backend devuelve fecha_entrada y fecha_salida (DATE), no timestamp
-          // Usar la fecha correspondiente según el tipo
-          const fechaRegistro = registroBD.fecha_entrada || registroBD.fecha_salida || new Date().toISOString().split('T')[0];
-          const fechaHoraCompleta = fechaRegistro ? new Date(fechaRegistro + 'T' + new Date().toTimeString().split(' ')[0]) : new Date();
+          // El backend devuelve fecha_entrada y fecha_salida (TIMESTAMP), usar la fecha correspondiente según el tipo
+          const fechaEntrada = registroBD.fecha_entrada ? new Date(registroBD.fecha_entrada) : undefined;
+          const fechaSalida = registroBD.fecha_salida ? new Date(registroBD.fecha_salida) : undefined;
+          const fechaRegistro = fechaEntrada || fechaSalida || new Date();
           
           const newAccessRecord: AccessRecord = {
             id: registroBD.id || registroBD.id_registro_entrada_salida,
             personaId: registroBD.personaId || registroBD.id_persona,
             persona: newRecord.persona,
             tipo: response.tipoRegistrado || registroBD.tipo, // Usar el tipo que realmente se registró
-            timestamp: fechaHoraCompleta,
-            fechaHora: fechaHoraCompleta,
+            timestamp: fechaRegistro,
+            fechaHora: fechaRegistro,
             ubicacion: 'Entrada Principal', // El backend no devuelve ubicación
             codigoQR: codigoQR,
+            fecha_entrada: fechaEntrada,
+            fecha_salida: fechaSalida,
           };
           setAccessRecords(prev => [newAccessRecord, ...prev]);
           
@@ -542,7 +556,6 @@ export default function App() {
       <LoginForm 
         onLogin={handleLogin} 
         users={users}
-        onUserAdd={handleUserAdd}
       />
     );
   }

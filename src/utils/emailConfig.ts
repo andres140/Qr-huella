@@ -4,16 +4,28 @@
 // 2. Crea un servicio de email (Gmail, Outlook, etc.)
 // 3. Crea una plantilla de email
 // 4. Reemplaza estos valores con tus credenciales reales
+//
+// IMPORTANTE: Lee el archivo INSTRUCCIONES_EMAILJS.md para una guía detallada
 
 export const EMAIL_CONFIG = {
   // Tu Public Key de EmailJS (se encuentra en Account > API Keys)
+  // Ejemplo: 'abcdefghijklmnop'
   publicKey: 'TU_PUBLIC_KEY_AQUI',
   
   // Tu Service ID (se encuentra en Email Services)
+  // Ejemplo: 'service_abc123'
   serviceId: 'TU_SERVICE_ID_AQUI',
   
   // Tu Template ID para recuperación de contraseña
+  // Ejemplo: 'template_xyz789'
   templateId: 'TU_TEMPLATE_ID_AQUI'
+};
+
+// Verificar si EmailJS está configurado
+export const isEmailConfigured = () => {
+  return EMAIL_CONFIG.publicKey !== 'TU_PUBLIC_KEY_AQUI' && 
+         EMAIL_CONFIG.serviceId !== 'TU_SERVICE_ID_AQUI' && 
+         EMAIL_CONFIG.templateId !== 'TU_TEMPLATE_ID_AQUI';
 };
 
 // INSTRUCCIONES PARA CONFIGURAR EMAILJS:

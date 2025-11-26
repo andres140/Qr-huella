@@ -636,7 +636,98 @@ export function ReportExporter({
         </CardContent>
       </Card>
 
-      {/* Tipos de reportes disponibles (ocultados por petición) */}
+      {/* Sección de descarga de datos cargados */}
+      {juiciosData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              Descargar Datos Cargados
+            </CardTitle>
+            <CardDescription>
+              Descargue los datos cargados en formato PDF o Excel
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                onClick={() => {
+                  const now = new Date();
+                  let contenido = `╔════════════════════════════════════════════════════════════════╗\n`;
+                  contenido += `║         SENA - REPORTE DE JUICIOS EVALUATIVOS                 ║\n`;
+                  contenido += `╚════════════════════════════════════════════════════════════════╝\n\n`;
+                  contenido += `Fecha de Generación: ${formatDate(now)}\n`;
+                  contenido += `Generado por: ${currentUser.nombre}\n`;
+                  contenido += `Total de Aprendices: ${juiciosData.length}\n\n`;
+                  contenido += `${'─'.repeat(100)}\n`;
+                  contenido += `FICHA    | TIPO DOC | NÚMERO DOC  | NOMBRE                    | APELLIDO                 | ESTADO\n`;
+                  contenido += `${'─'.repeat(100)}\n`;
+                  juiciosData.forEach(dato => {
+                    contenido += `${dato.ficha.padEnd(8)} | ${dato.tipoDocumento.padEnd(8)} | ${dato.numeroDocumento.padEnd(11)} | ${dato.nombre.padEnd(25).substring(0, 25)} | ${dato.apellido.padEnd(24).substring(0, 24)} | ${dato.estado}\n`;
+                  });
+                  contenido += `${'─'.repeat(100)}\n\n`;
+                  contenido += `Fin del reporte\n`;
+                  
+                  const blob = new Blob(['\uFEFF' + contenido], { type: 'text/plain;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `SENA_Juicios_Evaluativos_${now.toISOString().split('T')[0]}.txt`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  
+                  toast.success('✅ Reporte PDF Descargado', {
+                    description: 'El archivo se ha descargado exitosamente',
+                    duration: 3000,
+                  });
+                }}
+                className="flex-1"
+                variant="outline"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Descargar PDF
+              </Button>
+              <Button
+                onClick={() => {
+                  const now = new Date();
+                  let contenido = 'REPORTE DE JUICIOS EVALUATIVOS\n';
+                  contenido += `Generado el: ${formatDate(now)}\n`;
+                  contenido += `Total de Aprendices: ${juiciosData.length}\n\n`;
+                  contenido += 'Ficha,Tipo Documento,Número Documento,Nombre,Apellido,Estado\n';
+                  juiciosData.forEach(dato => {
+                    contenido += `"${dato.ficha}","${dato.tipoDocumento}","${dato.numeroDocumento}","${dato.nombre}","${dato.apellido}","${dato.estado}"\n`;
+                  });
+                  
+                  const blob = new Blob(['\uFEFF' + contenido], { type: 'text/csv;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `SENA_Juicios_Evaluativos_${now.toISOString().split('T')[0]}.csv`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  
+                  toast.success('✅ Reporte Excel Descargado', {
+                    description: 'El archivo CSV se ha descargado exitosamente',
+                    duration: 3000,
+                  });
+                }}
+                className="flex-1"
+                variant="outline"
+              >
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Descargar Excel (CSV)
+              </Button>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              <p>Total de registros disponibles para descarga: <strong>{juiciosData.length}</strong></p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

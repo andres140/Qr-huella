@@ -172,6 +172,80 @@ router.get('/verify', verificarToken, async (req, res) => {
   }
 });
 
+// Obtener usuario por email (para recuperación de contraseña)
+router.post('/usuario-por-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: true, message: 'Email es requerido' });
+    }
+    
+    const [usuarios] = await db.query(
+      'SELECT id_usuario, nombre, email, rol, estado FROM usuarios WHERE email = ?',
+      [email]
+    );
+    
+    if (usuarios.length === 0) {
+      return res.status(404).json({ error: true, message: 'Usuario no encontrado' });
+    }
+    
+    const usuario = usuarios[0];
+    res.json({ 
+      success: true, 
+      data: {
+        id: usuario.id_usuario,
+        nombre: usuario.nombre,
+        email: usuario.email,
+        rol: usuario.rol,
+        estado: usuario.estado
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener usuario por email:', error);
+    res.status(500).json({ error: true, message: 'Error al obtener usuario' });
+  }
+});
+
+// Obtener contraseña por email (para recuperación - solo para uso interno con código de verificación)
+// NOTA: En producción, esto debería ser más seguro (no devolver la contraseña directamente)
+router.post('/password-por-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: true, message: 'Email es requerido' });
+    }
+    
+    const [usuarios] = await db.query(
+      'SELECT id_usuario, nombre, email, passwords FROM usuarios WHERE email = ?',
+      [email]
+    );
+    
+    if (usuarios.length === 0) {
+      return res.status(404).json({ error: true, message: 'Usuario no encontrado' });
+    }
+    
+    const usuario = usuarios[0];
+    
+    // NOTA: En producción, esto NO debería devolver la contraseña directamente
+    // Debería generar un token de recuperación y permitir cambiar la contraseña
+    // Por ahora, devolvemos un mensaje indicando que la contraseña está hasheada
+    res.json({ 
+      success: true, 
+      data: {
+        id: usuario.id_usuario,
+        nombre: usuario.nombre,
+        email: usuario.email,
+        password: 'La contraseña está encriptada. Contacta al administrador para restablecerla.'
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener contraseña por email:', error);
+    res.status(500).json({ error: true, message: 'Error al obtener contraseña' });
+  }
+});
+
 module.exports = { router, verificarToken };
 
 

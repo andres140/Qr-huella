@@ -193,10 +193,7 @@ export function QRScanner({ onAccessGranted, personas, visitorQRs = [], onPerson
               <div className="relative w-full aspect-square bg-black rounded-lg overflow-hidden">
                 <video 
                   ref={ref} 
-                  className="w-full h-full object-cover"
-                  style={{ 
-                    transform: 'scaleX(-1)', // Efecto espejo para mejor UX
-                  }}
+                  className="w-full h-full object-cover -scale-x-100"
                 />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-48 h-48 border-2 border-white rounded-lg shadow-lg"></div>

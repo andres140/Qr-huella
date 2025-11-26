@@ -107,6 +107,26 @@ export const authAPI = {
     return handleResponse(response);
   },
   
+  getUserByEmail: async (email: string) => {
+    const response = await fetch(`${API_URL}/auth/usuario-por-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    
+    return handleResponse(response);
+  },
+  
+  getPasswordByEmail: async (email: string) => {
+    const response = await fetch(`${API_URL}/auth/password-por-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    
+    return handleResponse(response);
+  },
+  
   getCurrentUser: (): User | null => {
     const userStr = localStorage.getItem('user');
     return userStr ? JSON.parse(userStr) : null;

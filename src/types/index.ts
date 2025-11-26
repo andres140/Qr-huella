@@ -22,6 +22,8 @@ export interface AccessRecord {
   fechaHora?: Date; // Deprecated, usar timestamp
   ubicacion: string;
   codigoQR: string;
+  fecha_entrada?: Date | string; // Fecha y hora de entrada desde la BD
+  fecha_salida?: Date | string; // Fecha y hora de salida desde la BD
 }
 
 export interface AccessStats {

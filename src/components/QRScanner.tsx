@@ -22,26 +22,60 @@ export function QRScanner({ onAccessGranted, personas, visitorQRs = [], onPerson
     message: string;
     person?: Person;
   } | null>(null);
+  const [lastScannedCode, setLastScannedCode] = useState<string>('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Inicializar scanner con react-zxing
+  // Inicializar scanner con react-zxing - Optimizado
   const { ref } = useZxing({
     onDecodeResult(result) {
       const code = result.getText();
       console.log('QR escaneado:', code);
+      
+      // Evitar procesar el mismo código múltiples veces
+      if (code === lastScannedCode || isProcessing) {
+        return;
+      }
+      
+      setLastScannedCode(code);
       handleScannedQR(code);
     },
     onError(error) {
       console.error('Error en el scanner:', error);
     },
-    paused: !isScanning,
+    paused: !isScanning || isProcessing,
+    constraints: {
+      video: {
+        facingMode: 'environment', // Usar cámara trasera
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    },
+    timeBetweenDecodingAttempts: 100, // Reducir tiempo entre intentos
   });
 
   const handleScannedQR = async (code: string) => {
-    // Detener el scanner
-    setIsScanning(false);
+    // Evitar procesar si ya se está procesando
+    if (isProcessing) {
+      return;
+    }
     
-    // Procesar el código QR escaneado
-    await processQRCode(code);
+    setIsProcessing(true);
+    
+    // No detener el scanner inmediatamente, solo pausarlo
+    // Esto permite escanear más rápido si hay error
+    
+    try {
+      // Procesar el código QR escaneado
+      await processQRCode(code);
+    } catch (error) {
+      console.error('Error procesando QR:', error);
+    } finally {
+      // Esperar un momento antes de permitir otro escaneo
+      setTimeout(() => {
+        setIsProcessing(false);
+        setLastScannedCode('');
+      }, 2000);
+    }
   };
 
   const simulateQRScan = async () => {
@@ -266,13 +300,46 @@ export function QRScanner({ onAccessGranted, personas, visitorQRs = [], onPerson
     setManualCode('');
   };
 
-  const startRealScan = () => {
-    setIsScanning(true);
-    setScanResult(null);
+  const startRealScan = async () => {
+    try {
+      setIsScanning(true);
+      setScanResult(null);
+      setLastScannedCode('');
+      setIsProcessing(false);
+      
+      // Solicitar permisos de cámara explícitamente
+      await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        } 
+      });
+      
+      // Si se obtiene el stream, el scanner ya está listo
+      // No necesitamos hacer nada más, react-zxing manejará el resto
+      console.log('✅ Cámara iniciada correctamente');
+    } catch (error: any) {
+      console.error('Error al iniciar cámara:', error);
+      setIsScanning(false);
+      setScanResult({
+        success: false,
+        message: `Error al acceder a la cámara: ${error.message || 'Permisos denegados'}`,
+      });
+    }
   };
 
   const stopScan = () => {
     setIsScanning(false);
+    setIsProcessing(false);
+    setLastScannedCode('');
+    
+    // Detener todos los streams de video
+    if (ref.current && ref.current.srcObject) {
+      const stream = ref.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      ref.current.srcObject = null;
+    }
   };
 
   return (
