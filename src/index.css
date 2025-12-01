@@ -2296,43 +2296,87 @@ html {
 }
 
 [data-sonner-toast] {
-  background: #fff !important;
+  background: #ffffff !important;
   border: 2px solid #e5e7eb !important;
-  box-shadow: 0 10px 15px -3px #0000001a, 0 4px 6px -2px #0000000d !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+  color: #1f2937 !important;
+  padding: 16px !important;
+  min-width: 300px !important;
+  max-width: 500px !important;
+}
+
+[data-sonner-toast] * {
+  color: inherit !important;
 }
 
 [data-sonner-toast][data-type="success"] {
-  color: #166534 !important;
   background: #f0fdf4 !important;
-  border-color: #86efac !important;
+  border-color: #22c55e !important;
+  color: #166534 !important;
+}
+
+[data-sonner-toast][data-type="success"] * {
+  color: #166534 !important;
 }
 
 [data-sonner-toast][data-type="error"] {
-  color: #991b1b !important;
   background: #fef2f2 !important;
-  border-color: #fca5a5 !important;
+  border-color: #ef4444 !important;
+  color: #991b1b !important;
+}
+
+[data-sonner-toast][data-type="error"] * {
+  color: #991b1b !important;
 }
 
 [data-sonner-toast][data-type="warning"] {
-  color: #854d0e !important;
   background: #fefce8 !important;
-  border-color: #fde047 !important;
+  border-color: #eab308 !important;
+  color: #854d0e !important;
+}
+
+[data-sonner-toast][data-type="warning"] * {
+  color: #854d0e !important;
 }
 
 [data-sonner-toast][data-type="info"] {
-  color: #1e40af !important;
   background: #eff6ff !important;
-  border-color: #93c5fd !important;
+  border-color: #3b82f6 !important;
+  color: #1e40af !important;
+}
+
+[data-sonner-toast][data-type="info"] * {
+  color: #1e40af !important;
 }
 
 [data-sonner-toast] [data-title] {
-  font-size: .95rem !important;
-  font-weight: 600 !important;
+  font-size: 1rem !important;
+  font-weight: 700 !important;
+  color: inherit !important;
+  margin-bottom: 4px !important;
+  line-height: 1.4 !important;
 }
 
 [data-sonner-toast] [data-description] {
-  opacity: .9 !important;
-  font-size: .875rem !important;
+  font-size: 0.875rem !important;
+  color: inherit !important;
+  opacity: 0.95 !important;
+  line-height: 1.5 !important;
+  margin-top: 4px !important;
+}
+
+[data-sonner-toast] svg {
+  color: inherit !important;
+  flex-shrink: 0 !important;
+}
+
+[data-sonner-toast] button {
+  color: inherit !important;
+  opacity: 0.8 !important;
+}
+
+[data-sonner-toast] button:hover {
+  opacity: 1 !important;
 }
 
 @property --tw-translate-x {

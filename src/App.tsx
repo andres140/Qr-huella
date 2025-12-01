@@ -13,7 +13,7 @@ import {
   calculateAccessStats,
   generateMockVisitorQRs
 } from './data/mockData';
-import { aprendicesAPI, entradasSalidasAPI, authAPI } from './services/api';
+import { aprendicesAPI, entradasSalidasAPI, authAPI, usuariosAPI } from './services/api';
 import api from './services/api';
 import { toast } from 'sonner';
 
@@ -33,23 +33,50 @@ export default function App() {
     visitantesDentro: 0
   });
 
-  // Cargar usuarios desde localStorage al iniciar
+  // Cargar usuarios desde el backend al iniciar (solo si hay usuario logueado)
   useEffect(() => {
+    const loadUsers = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      try {
+        const response = await usuariosAPI.getAll();
+        if (response.success && response.data) {
+          // Convertir usuarios del backend a formato User
+          const usuariosFromBackend: User[] = response.data.map((u: any) => ({
+            id: u.id.toString(),
+            usuario: u.email.split('@')[0], // Generar usuario desde email
+            nombre: u.nombre,
+            email: u.email,
+            password: '', // No se envía la contraseña desde el backend por seguridad
+            rol: u.rol,
+            estado: u.estado,
+            fechaCreacion: u.fechaCreacion ? new Date(u.fechaCreacion) : new Date(),
+            ultimoAcceso: u.ultimoAcceso ? new Date(u.ultimoAcceso) : undefined,
+          }));
+          setUsers(usuariosFromBackend);
+        }
+      } catch (error) {
+        console.error('Error loading users from backend:', error);
+        // Si falla, intentar cargar desde localStorage como fallback
     const savedUsers = localStorage.getItem('sena_users');
     if (savedUsers) {
       try {
         const parsedUsers = JSON.parse(savedUsers);
-        // Convertir fechas de string a Date
         const usersWithDates = parsedUsers.map((u: any) => ({
           ...u,
           fechaCreacion: new Date(u.fechaCreacion)
         }));
         setUsers(usersWithDates);
-      } catch (error) {
-        console.error('Error loading users from localStorage:', error);
+          } catch (e) {
+            console.error('Error loading users from localStorage:', e);
+          }
+        }
       }
-    }
-  }, []);
+    };
+    
+    loadUsers();
+  }, [user]); // Recargar cuando cambie el usuario logueado
 
   // Verificar si hay un usuario logueado (token válido) al iniciar
   useEffect(() => {
@@ -219,6 +246,40 @@ export default function App() {
     const newStats = calculateAccessStats(personas, accessRecords, visitorQRs);
     setStats(newStats);
   }, [personas, accessRecords, visitorQRs]);
+
+  // Proceso automático para marcar salidas de visitantes cuando expire su QR
+  useEffect(() => {
+    if (!user) return; // Solo ejecutar si hay usuario logueado
+    
+    const marcarSalidasAutomaticas = async () => {
+      try {
+        const response = await api.visitantes.marcarSalidasAutomaticas();
+        if (response.success && response.salidasMarcadas > 0) {
+          console.log(`✅ ${response.salidasMarcadas} salidas automáticas marcadas`);
+          // Recargar registros de acceso para actualizar la UI
+          if (user) {
+            const registrosResponse = await accesosAPI.getAll({ limit: 100 });
+            if (registrosResponse.success && registrosResponse.data) {
+              const registros = registrosResponse.data.map((r: any) => ({
+                ...r,
+                timestamp: new Date(r.timestamp || r.fecha_entrada || r.fecha_salida),
+                fechaHora: new Date(r.fecha_entrada || r.fecha_salida || r.timestamp),
+              }));
+              setAccessRecords(registros);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error al marcar salidas automáticas:', error);
+      }
+    };
+
+    // Ejecutar inmediatamente y luego cada minuto
+    marcarSalidasAutomaticas();
+    const interval = setInterval(marcarSalidasAutomaticas, 60000); // Cada minuto
+    
+    return () => clearInterval(interval);
+  }, [user]);
 
   const handleLogin = (userData: User) => {
     setUser(userData);
@@ -422,7 +483,7 @@ export default function App() {
       
       if (aprendicesToAdd.length === 0) {
         toast.warning('⚠️ No hay aprendices para registrar');
-        return 0;
+        return { exitosos: 0, duplicados: 0, fallidos: 0 };
       }
       
       console.log(`📦 Registrando ${aprendicesToAdd.length} aprendices en BD...`);
@@ -463,27 +524,20 @@ export default function App() {
           });
         }
         
-        // Mostrar mensaje con resultados
-        let mensaje = `✅ ${exitosos} aprendices registrados correctamente`;
-        if (duplicados > 0) {
-          mensaje += `, ${duplicados} ya existían`;
-        }
-        if (fallidos > 0) {
-          mensaje += `, ${fallidos} con errores`;
-        }
-        
-        toast.success(mensaje, {
-          duration: 6000,
-        });
-        
-        return exitosos;
+        // Retornar el objeto completo para que ReportExporter lo use
+        return { 
+          exitosos, 
+          duplicados, 
+          fallidos,
+          errores: response.data.errores || []
+        };
       } else {
         throw new Error(response.message || 'Error desconocido en carga masiva');
       }
     } catch (error: any) {
       console.error('❌ Error en carga masiva:', error);
       toast.error('❌ Error al registrar aprendices: ' + (error.message || 'Error desconocido'));
-      return 0;
+      return { exitosos: 0, duplicados: 0, fallidos: 0 };
     }
   };
 
@@ -530,20 +584,136 @@ export default function App() {
     setVisitorQRs(prev => [...prev, newQR]);
   };
 
-  const handleUserAdd = (newUserData: Omit<User, 'id'>) => {
-    const newUser: User = {
-      ...newUserData,
-      id: Date.now().toString()
-    };
-    setUsers(prev => [...prev, newUser]);
+  const handleUserAdd = async (newUserData: Omit<User, 'id'>) => {
+    try {
+      // Llamar al backend para crear el usuario en la BD
+      const response = await usuariosAPI.create({
+        nombre: newUserData.nombre,
+        email: newUserData.email,
+        password: newUserData.password,
+        rol: newUserData.rol,
+      });
+
+      if (response.success && response.data) {
+        const nuevoUsuario: User = {
+          id: response.data.id.toString(),
+          usuario: newUserData.email.split('@')[0],
+          nombre: response.data.nombre,
+          email: response.data.email,
+          password: newUserData.password, // Guardar temporalmente para mostrarlo
+          rol: response.data.rol,
+          estado: response.data.estado || 'ACTIVO',
+          fechaCreacion: response.data.fechaCreacion ? new Date(response.data.fechaCreacion) : new Date(),
+        };
+
+        // Recargar lista de usuarios desde el backend
+        const usuariosResponse = await usuariosAPI.getAll();
+        if (usuariosResponse.success && usuariosResponse.data) {
+          const usuariosFromBackend: User[] = usuariosResponse.data.map((u: any) => ({
+            id: u.id.toString(),
+            usuario: u.email.split('@')[0],
+            nombre: u.nombre,
+            email: u.email,
+            password: '',
+            rol: u.rol,
+            estado: u.estado,
+            fechaCreacion: u.fechaCreacion ? new Date(u.fechaCreacion) : new Date(),
+            ultimoAcceso: u.ultimoAcceso ? new Date(u.ultimoAcceso) : undefined,
+          }));
+          setUsers(usuariosFromBackend);
+        }
+
+        // Mostrar credenciales al usuario
+        toast.success('✅ Usuario Creado Exitosamente', {
+          description: `Email: ${nuevoUsuario.email} | Contraseña: ${newUserData.password}`,
+          duration: 10000,
+        });
+      } else {
+        throw new Error(response.message || 'Error al crear usuario');
+      }
+    } catch (error: any) {
+      console.error('Error al crear usuario:', error);
+      toast.error('❌ Error al crear usuario', {
+        description: error.message || 'No se pudo crear el usuario en la base de datos',
+        duration: 5000,
+      });
+      throw error; // Re-lanzar para que UserManagement lo maneje
+    }
   };
 
-  const handleUserUpdate = (updatedUser: User) => {
-    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+  const handleUserUpdate = async (updatedUser: User) => {
+    try {
+      // Llamar al backend para actualizar el usuario
+      const response = await usuariosAPI.update(updatedUser.id, {
+        nombre: updatedUser.nombre,
+        email: updatedUser.email,
+        rol: updatedUser.rol,
+        estado: updatedUser.estado,
+      });
+
+      if (response.success && response.data) {
+        // Recargar lista de usuarios desde el backend
+        const usuariosResponse = await usuariosAPI.getAll();
+        if (usuariosResponse.success && usuariosResponse.data) {
+          const usuariosFromBackend: User[] = usuariosResponse.data.map((u: any) => ({
+            id: u.id.toString(),
+            usuario: u.email.split('@')[0],
+            nombre: u.nombre,
+            email: u.email,
+            password: '',
+            rol: u.rol,
+            estado: u.estado,
+            fechaCreacion: u.fechaCreacion ? new Date(u.fechaCreacion) : new Date(),
+            ultimoAcceso: u.ultimoAcceso ? new Date(u.ultimoAcceso) : undefined,
+          }));
+          setUsers(usuariosFromBackend);
+        }
+      } else {
+        throw new Error(response.message || 'Error al actualizar usuario');
+      }
+    } catch (error: any) {
+      console.error('Error al actualizar usuario:', error);
+      toast.error('❌ Error al actualizar usuario', {
+        description: error.message || 'No se pudo actualizar el usuario',
+        duration: 5000,
+      });
+      throw error;
+    }
   };
 
-  const handleUserDelete = (userId: string) => {
-    setUsers(prev => prev.filter(u => u.id !== userId));
+  const handleUserDelete = async (userId: string) => {
+    try {
+      // Llamar al backend para eliminar el usuario
+      const response = await usuariosAPI.delete(userId);
+
+      if (response.success) {
+        // Recargar lista de usuarios desde el backend
+        const usuariosResponse = await usuariosAPI.getAll();
+        if (usuariosResponse.success && usuariosResponse.data) {
+          const usuariosFromBackend: User[] = usuariosResponse.data.map((u: any) => ({
+            id: u.id.toString(),
+            usuario: u.email.split('@')[0],
+            nombre: u.nombre,
+            email: u.email,
+            password: '',
+            rol: u.rol,
+            estado: u.estado,
+            fechaCreacion: u.fechaCreacion ? new Date(u.fechaCreacion) : new Date(),
+            ultimoAcceso: u.ultimoAcceso ? new Date(u.ultimoAcceso) : undefined,
+          }));
+          setUsers(usuariosFromBackend);
+        }
+      } else {
+        throw new Error(response.message || 'Error al eliminar usuario');
+      }
+    } catch (error: any) {
+      console.error('Error al eliminar usuario:', error);
+      toast.error('❌ Error al eliminar usuario', {
+        description: error.message || 'No se pudo eliminar el usuario',
+        duration: 5000,
+      });
+      throw error;
+    }
   };
 
   const handleSendMessage = (message: ChatMessage) => {

@@ -109,3 +109,7 @@ export const EMAIL_CONFIG = {
 - **Seguridad**: Las credenciales están en el frontend, pero EmailJS es seguro para uso público
 - **Producción**: Considera usar variables de entorno para las credenciales
 
+
+
+
+

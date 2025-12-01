@@ -26,6 +26,7 @@ import {
 
 import { Person, AccessRecord, AccessStats, User, VisitorQR } from '../types';
 import { aprendicesAPI } from '../services/api';
+import api from '../services/api';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 
 interface AdminViewProps {
@@ -64,9 +65,12 @@ export function AdminView({
   // Búsqueda de aprendices
   const [searchTerm, setSearchTerm] = useState('');
   const [searchEstado, setSearchEstado] = useState<string>('TODOS');
+  const [searchFicha, setSearchFicha] = useState('');
+  const [searchPrograma, setSearchPrograma] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [lastVisitorQRCount, setLastVisitorQRCount] = useState(0);
 
   // Subida de foto
   const [uploadingFoto, setUploadingFoto] = useState<string | null>(null);
@@ -89,8 +93,22 @@ export function AdminView({
   useEffect(() => {
     const checkExpiredQRs = () => {
       const now = new Date();
+      const maxAgeMs = 5 * 60 * 1000; // Solo alertar si expiró en los últimos 5 minutos
+
       visitorQRs.forEach((qr) => {
-        if (qr.fechaExpiracion <= now && qr.estado === 'ACTIVO' && !notifiedQRs.current.has(qr.id)) {
+        const expTime = qr.fechaExpiracion.getTime();
+        const nowTime = now.getTime();
+        const diff = nowTime - expTime;
+
+        // Solo alertar si:
+        // - ya expiró
+        // - la expiración fue hace poco (para evitar alertas "fantasma" de QRs muy antiguos)
+        if (
+          diff >= 0 &&
+          diff <= maxAgeMs &&
+          qr.estado === 'ACTIVO' &&
+          !notifiedQRs.current.has(qr.id)
+        ) {
           notifiedQRs.current.add(qr.id);
           toast.warning('⚠️ QR de Visitante Expirado', {
             description: `${qr.visitante.nombre} (${qr.visitante.documento}) - Expiró el ${formatDateTime(
@@ -103,33 +121,60 @@ export function AdminView({
     };
 
     checkExpiredQRs();
-    const interval = setInterval(checkExpiredQRs, 60000);
+    const interval = setInterval(checkExpiredQRs, 30000); // Verificar cada 30 segundos
     return () => clearInterval(interval);
   }, [visitorQRs]);
+  
+  // Proceso automático para marcar salidas cuando expire el QR
+  useEffect(() => {
+    if (!user) return;
+    
+    const marcarSalidasAutomaticas = async () => {
+      try {
+        const response = await api.visitantes.marcarSalidasAutomaticas();
+        if (response.success && response.salidasMarcadas > 0) {
+          console.log(`✅ ${response.salidasMarcadas} salidas automáticas marcadas desde AdminView`);
+        }
+      } catch (error) {
+        console.error('Error al marcar salidas automáticas:', error);
+      }
+    };
+
+    // Ejecutar cada minuto para marcar salidas automáticas
+    marcarSalidasAutomaticas();
+    const interval = setInterval(marcarSalidasAutomaticas, 60000);
+    
+    return () => clearInterval(interval);
+  }, [user]);
 
   useEffect(() => {
-    const lastQRId = localStorage.getItem('lastVisitorQRNotified');
-    if (visitorQRs.length > 0) {
+    // Mostrar la alerta de "Nuevo Visitante Registrado" SOLO cuando realmente
+    // se haya generado un nuevo QR de visitante en esta sesión.
+    if (visitorQRs.length === 0) return;
+
+    // Si la cantidad de QRs aumentó, asumimos que se generó uno nuevo
+    if (visitorQRs.length > lastVisitorQRCount) {
       const latestQR = visitantesOrdenados[0];
-      if (lastQRId !== latestQR.id) {
-        localStorage.setItem('lastVisitorQRNotified', latestQR.id);
-        if (lastQRId !== null) {
-          toast.success('✅ Nuevo Visitante Registrado', {
-            description: `${latestQR.visitante.nombre} - QR válido hasta ${formatDateTime(
-              latestQR.fechaExpiracion,
-            )}`,
-            duration: 6000,
-          });
-        }
+
+      // Evitar mostrar la alerta en el primer render (cuando se cargan datos históricos)
+      if (lastVisitorQRCount > 0) {
+        toast.success('✅ Nuevo Visitante Registrado', {
+          description: `${latestQR.visitante.nombre} - QR válido hasta ${formatDateTime(
+            latestQR.fechaExpiracion,
+          )}`,
+          duration: 6000,
+        });
       }
+
+      setLastVisitorQRCount(visitorQRs.length);
     }
-  }, [visitorQRs, visitantesOrdenados]);
+  }, [visitorQRs, visitantesOrdenados, lastVisitorQRCount]);
 
   // Buscar aprendices
   const handleSearchAprendices = async () => {
-    if (!searchTerm.trim() && searchEstado === 'TODOS') {
+    if (!searchTerm.trim() && searchEstado === 'TODOS' && !searchFicha.trim() && !searchPrograma.trim()) {
       toast.warning('⚠️ Búsqueda Vacía', {
-        description: 'Ingrese un término de búsqueda o seleccione un estado',
+        description: 'Ingrese un término de búsqueda, ficha, programa o seleccione un estado',
         duration: 4000,
       });
       return;
@@ -139,15 +184,155 @@ export function AdminView({
     setHasSearched(true);
 
     try {
-      const params: { estado?: string; buscar?: string } = {};
-      if (searchTerm.trim()) params.buscar = searchTerm.trim();
+      const term = searchTerm.trim();
+      // Normalizar posible documento: quitar puntos, comas, espacios, etc.
+      const numericTerm = term.replace(/\D/g, '');
+      const isNumeric = numericTerm.length > 0 && /^\d+$/.test(numericTerm);
+
+      // Si solo se está buscando por documento (cédula) y no hay otros filtros,
+      // usar una búsqueda específica basada en documento y filtrar exacto en el frontend.
+      if (term && isNumeric && searchEstado === 'TODOS' && !searchFicha.trim() && !searchPrograma.trim()) {
+        try {
+          // Usar getAll para garantizar que venga la misma estructura (incluyendo foto)
+          const response = await aprendicesAPI.getAll({ buscar: numericTerm });
+          if (response.success && response.data) {
+            // Filtrar exacto por documento limpio
+            const results = (response.data as any[]).filter((a) => {
+              const doc = String(a.documento || '').replace(/\D/g, '');
+              return doc === numericTerm;
+            });
+
+            setSearchResults(results);
+            toast.success('✅ Búsqueda por documento completada', {
+              description:
+                results.length === 1
+                  ? 'Se encontró el aprendiz con ese documento'
+                  : `Se encontraron ${results.length} aprendices con ese documento`,
+              duration: 3000,
+            });
+          } else {
+            setSearchResults([]);
+            toast.info('ℹ️ Sin Resultados', {
+              description: 'No se encontró ningún aprendiz con ese documento',
+              duration: 4000,
+            });
+          }
+        } catch (error) {
+          console.error('Error al buscar por documento:', error);
+          toast.error('❌ Error en la Búsqueda por documento', {
+            description: 'No se pudo realizar la búsqueda por documento. Intente nuevamente.',
+            duration: 5000,
+          });
+          setSearchResults([]);
+        } finally {
+          setIsSearching(false);
+        }
+        return;
+      }
+
+      // Búsqueda general usando filtros combinados
+      // Enviar ficha y programa directamente al backend para que filtre correctamente
+      const params: { estado?: string; buscar?: string; ficha?: string; programa?: string } = {};
+      if (term) params.buscar = term;
       if (searchEstado !== 'TODOS') params.estado = searchEstado;
+      
+      const fichaTrim = searchFicha.trim();
+      const programaTrim = searchPrograma.trim();
+      
+      // Si hay ficha, enviarla al backend (pero solo si no hay término de búsqueda general)
+      // Si hay término de búsqueda, el backend lo ignorará si hay ficha o programa
+      if (fichaTrim) {
+        params.ficha = fichaTrim;
+      }
+      
+      if (programaTrim) {
+        params.programa = programaTrim;
+      }
 
       const response = await aprendicesAPI.getAll(params);
       if (response.success && response.data) {
-        setSearchResults(response.data);
+        let results = response.data as any[];
+        
+        console.log(`📊 Resultados del backend: ${results.length} aprendices`);
+        if (term) console.log(`   - Término de búsqueda: "${term}"`);
+        if (fichaTrim) console.log(`   - Ficha: "${fichaTrim}"`);
+        if (programaTrim) console.log(`   - Programa: "${programaTrim}"`);
+
+        // IMPORTANTE: Aplicar TODOS los filtros de manera combinada (AND)
+        // Esto asegura que cuando se combinan múltiples filtros, solo se muestren los que coinciden con TODOS
+        
+        // Filtro por ficha (si está presente)
+        if (fichaTrim) {
+          const antes = results.length;
+          results = results.filter((a) => String(a.ficha || '').trim() === fichaTrim);
+          console.log(`   - Filtro ficha: ${antes} → ${results.length}`);
+        }
+
+        // Filtro por programa (si está presente)
+        if (programaTrim) {
+          const antes = results.length;
+          results = results.filter((a) =>
+            String(a.programa || '').toUpperCase().includes(programaTrim.toUpperCase()),
+          );
+          console.log(`   - Filtro programa: ${antes} → ${results.length}`);
+        }
+
+        // Filtro por término de búsqueda (nombre, cédula, etc.) - SIEMPRE aplicar si hay término
+        // IMPORTANTE: Solo aplicar si NO hay ficha ni programa, porque el backend ya lo filtró
+        // Si hay ficha o programa, el backend ya aplicó el filtro de buscar
+        if (term && term.trim() && !fichaTrim && !programaTrim) {
+          const termTrim = term.trim();
+          const termUpper = termTrim.toUpperCase();
+          const antes = results.length;
+          results = results.filter((a) => {
+            const nombreCompleto = `${a.nombres || ''} ${a.apellidos || ''}`.toUpperCase().trim();
+            const nombres = (a.nombres || '').toUpperCase().trim();
+            const apellidos = (a.apellidos || '').toUpperCase().trim();
+            // Normalizar documento: solo números
+            const documentoNormalizado = String(a.documento || '').replace(/\D/g, '');
+            const termNormalizado = termTrim.replace(/\D/g, '');
+            
+            // Si el término es numérico, buscar coincidencia en documento normalizado
+            if (/^\d+$/.test(termTrim)) {
+              return documentoNormalizado === termNormalizado || documentoNormalizado.includes(termNormalizado);
+            }
+            
+            // Si es texto, buscar SOLO en nombres, apellidos, nombre completo o documento
+            return nombres.includes(termUpper) || 
+                   apellidos.includes(termUpper) || 
+                   nombreCompleto.includes(termUpper) ||
+                   String(a.documento || '').toUpperCase().includes(termUpper);
+          });
+          console.log(`   - Filtro término (solo frontend): ${antes} → ${results.length}`);
+        } else if (term && term.trim() && (fichaTrim || programaTrim)) {
+          // Si hay ficha o programa, el backend ya filtró, pero verificamos que el término coincida
+          const termTrim = term.trim();
+          const termUpper = termTrim.toUpperCase();
+          const antes = results.length;
+          results = results.filter((a) => {
+            const nombreCompleto = `${a.nombres || ''} ${a.apellidos || ''}`.toUpperCase().trim();
+            const nombres = (a.nombres || '').toUpperCase().trim();
+            const apellidos = (a.apellidos || '').toUpperCase().trim();
+            const documentoNormalizado = String(a.documento || '').replace(/\D/g, '');
+            const termNormalizado = termTrim.replace(/\D/g, '');
+            
+            if (/^\d+$/.test(termTrim)) {
+              return documentoNormalizado === termNormalizado || documentoNormalizado.includes(termNormalizado);
+            }
+            
+            return nombres.includes(termUpper) || 
+                   apellidos.includes(termUpper) || 
+                   nombreCompleto.includes(termUpper) ||
+                   String(a.documento || '').toUpperCase().includes(termUpper);
+          });
+          console.log(`   - Filtro término (combinado): ${antes} → ${results.length}`);
+        }
+        
+        console.log(`✅ Resultados finales: ${results.length} aprendices`);
+
+        setSearchResults(results);
         toast.success('✅ Búsqueda Completada', {
-          description: `Se encontraron ${response.data.length} aprendices`,
+          description: `Se encontraron ${results.length} aprendices`,
           duration: 3000,
         });
       } else {
@@ -172,6 +357,8 @@ export function AdminView({
   const handleClearSearch = () => {
     setSearchTerm('');
     setSearchEstado('TODOS');
+    setSearchFicha('');
+    setSearchPrograma('');
     setSearchResults([]);
     setHasSearched(false);
   };
@@ -356,8 +543,8 @@ export function AdminView({
               <CardDescription>Busque aprendices por nombre, apellido o documento</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
                   <Label htmlFor="search-term">Término de Búsqueda</Label>
                   <Input
                     id="search-term"
@@ -365,6 +552,32 @@ export function AdminView({
                     placeholder="Nombre, apellido o documento..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSearchAprendices();
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="search-ficha">Ficha</Label>
+                  <Input
+                    id="search-ficha"
+                    type="text"
+                    placeholder="Buscar por ficha..."
+                    value={searchFicha}
+                    onChange={(e) => setSearchFicha(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSearchAprendices();
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="search-programa">Programa</Label>
+                  <Input
+                    id="search-programa"
+                    type="text"
+                    placeholder="Buscar por programa..."
+                    value={searchPrograma}
+                    onChange={(e) => setSearchPrograma(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSearchAprendices();
                     }}

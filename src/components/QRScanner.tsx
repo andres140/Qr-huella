@@ -108,10 +108,12 @@ export function QRScanner({ onAccessGranted, personas, visitorQRs = [], onPerson
         return;
       }
 
-      if (visitorQR.estado === 'EXPIRADO' || visitorQR.estado === 'USADO') {
+      // IMPORTANTE: Solo rechazar si está EXPIRADO, no si está USADO
+      // El QR puede usarse múltiples veces mientras esté vigente (para entrar y salir)
+      if (visitorQR.estado === 'EXPIRADO') {
         setScanResult({
           success: false,
-          message: `QR Inválido: Estado ${visitorQR.estado}`,
+          message: `QR Expirado: El código ha vencido`,
           person: visitorQR.visitante
         });
         return;

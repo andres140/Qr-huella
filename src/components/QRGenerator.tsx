@@ -33,15 +33,23 @@ export function QRGenerator({ visitorQR, onDownload }: QRGeneratorProps) {
 
   const formatDateTime = (date: Date | string | null | undefined) => {
     if (!date) return 'Fecha no disponible';
-    const dateObj = date instanceof Date ? date : new Date(date);
+    let dateObj: Date;
+    if (date instanceof Date) {
+      dateObj = date;
+    } else {
+      // Si viene como string, parsearlo correctamente
+      dateObj = new Date(date);
+    }
     if (isNaN(dateObj.getTime())) return 'Fecha inválida';
-    return new Intl.DateTimeFormat('es-CO', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(dateObj);
+    
+    // Formatear con hora local correcta (sin conversión de zona horaria)
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    const hours = String(dateObj.getHours()).padStart(2, '0');
+    const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
   };
 
   const handleDownload = () => {

@@ -9,7 +9,7 @@ router.use(verificarToken);
 // Obtener todos los registros de acceso (alias para entradas_salidas)
 router.get('/', async (req, res) => {
   try {
-    const { fecha, tipo, personaId, limit = 100 } = req.query;
+    const { fecha, fechaDesde, fechaHasta, tipo, personaId, limit = 100 } = req.query;
     let query = `
       SELECT 
         r.id_registro_entrada_salida as id,
@@ -32,8 +32,18 @@ router.get('/', async (req, res) => {
     const params = [];
     
     if (fecha) {
-      query += ' AND (r.fecha_entrada = ? OR r.fecha_salida = ?)';
+      query += ' AND (DATE(r.fecha_entrada) = ? OR DATE(r.fecha_salida) = ?)';
       params.push(fecha, fecha);
+    } else {
+      // Si hay rango de fechas
+      if (fechaDesde) {
+        query += ' AND (DATE(r.fecha_entrada) >= ? OR DATE(r.fecha_salida) >= ?)';
+        params.push(fechaDesde, fechaDesde);
+      }
+      if (fechaHasta) {
+        query += ' AND (DATE(r.fecha_entrada) <= ? OR DATE(r.fecha_salida) <= ?)';
+        params.push(fechaHasta, fechaHasta);
+      }
     }
     
     if (tipo) {

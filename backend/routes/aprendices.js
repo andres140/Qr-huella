@@ -12,7 +12,7 @@ router.use(verificarToken);
 // Obtener todos los aprendices (personas con rol de aprendiz)
 router.get('/', async (req, res) => {
   try {
-    const { estado, buscar } = req.query;
+    const { estado, buscar, ficha, programa } = req.query;
     
     // Primero obtener el ID del rol "APRENDIZ" o similar
     let query = `
@@ -41,10 +41,90 @@ router.get('/', async (req, res) => {
       params.push(estado);
     }
     
-    if (buscar) {
-      query += ' AND (p.nombres LIKE ? OR p.apellidos LIKE ? OR p.documento LIKE ?)';
-      const buscarParam = `%${buscar}%`;
-      params.push(buscarParam, buscarParam, buscarParam);
+    // Si hay ficha o programa, aplicar esos filtros primero (más específicos)
+    // y solo aplicar 'buscar' si no hay ficha ni programa
+    if (ficha) {
+      // Ficha suele ser un código exacto, filtrar por igualdad exacta
+      // Normalizar: convertir a string, quitar espacios, y comparar
+      const fichaTrim = String(ficha).trim();
+      // Buscar tanto con comparación exacta como con LIKE para mayor flexibilidad
+      // También considerar que puede estar guardada como número o string
+      query += ' AND (TRIM(CAST(p.ficha AS CHAR)) = ? OR CAST(p.ficha AS CHAR) = ? OR p.ficha = ?)';
+      params.push(fichaTrim, fichaTrim, fichaTrim);
+      console.log(`🔍 Buscando por ficha: "${fichaTrim}"`);
+    }
+    
+    if (programa) {
+      // Para programa, permitir escribir por ejemplo "adso" y que coincida con nombres más largos
+      const programaTrim = String(programa).trim().toUpperCase();
+      query += ' AND UPPER(p.programa) LIKE ?';
+      params.push(`%${programaTrim}%`);
+    }
+    
+    // Solo aplicar 'buscar' si no hay ficha ni programa (para evitar conflictos)
+    // O si hay ficha/programa, usar 'buscar' como filtro adicional en nombres/documentos
+    if (buscar && !ficha && !programa) {
+      const buscarTrim = buscar.trim();
+      console.log(`🔍 Búsqueda simple (sin ficha/programa): "${buscarTrim}"`);
+
+      // Si el término de búsqueda es solo números, buscar coincidencia exacta en documento
+      // IMPORTANTE: Normalizar el documento eliminando caracteres no numéricos antes de comparar
+      if (/^\d+$/.test(buscarTrim)) {
+        // Normalizar el término de búsqueda (solo números)
+        const docNormalizado = buscarTrim.replace(/\D/g, '');
+        // Buscar coincidencia exacta en documento
+        // También buscar con LIKE por si el documento tiene formato diferente
+        query += ' AND (p.documento = ? OR p.documento LIKE ?)';
+        params.push(docNormalizado, `%${docNormalizado}%`);
+        console.log(`   📄 Buscando documento: "${docNormalizado}"`);
+      } else {
+        // Normalizar a MAYÚSCULAS para comparar sin problemas de may/min
+        const buscarUpper = buscarTrim.toUpperCase();
+        const buscarLike = `%${buscarUpper}%`;
+
+        // BÚSQUEDA MEJORADA: Buscar en nombres, apellidos, nombre completo y documento
+        // NO buscar en programa ni ficha cuando es texto (para evitar resultados irrelevantes)
+        query += `
+          AND (
+            UPPER(TRIM(p.nombres)) LIKE ?
+            OR UPPER(TRIM(p.apellidos)) LIKE ?
+            OR UPPER(TRIM(CONCAT(p.nombres, ' ', p.apellidos))) LIKE ?
+            OR UPPER(TRIM(p.documento)) LIKE ?
+          )
+        `;
+        params.push(
+          buscarLike,
+          buscarLike,
+          buscarLike,
+          buscarLike
+        );
+        console.log(`   📝 Buscando texto: "${buscarTrim}" en nombres, apellidos y documento`);
+      }
+    } else if (buscar && (ficha || programa)) {
+      // Si hay ficha o programa Y también hay buscar, usar buscar como filtro adicional
+      // IMPORTANTE: Aplicar como AND, no como OR, para que todos los filtros se combinen
+      const buscarTrim = buscar.trim();
+      
+      if (/^\d+$/.test(buscarTrim)) {
+        // Si es numérico, buscar coincidencia exacta en documento
+        query += ' AND p.documento = ?';
+        params.push(buscarTrim);
+      } else {
+        // Si es texto, buscar en nombres, apellidos, nombre completo o documento
+        // Usar OR dentro del filtro de buscar, pero AND con los otros filtros
+        const buscarUpper = buscarTrim.toUpperCase();
+        const buscarLike = `%${buscarUpper}%`;
+        query += `
+          AND (
+            UPPER(p.nombres) LIKE ?
+            OR UPPER(p.apellidos) LIKE ?
+            OR UPPER(CONCAT(p.nombres, ' ', p.apellidos)) LIKE ?
+            OR UPPER(p.documento) LIKE ?
+          )
+        `;
+        params.push(buscarLike, buscarLike, buscarLike, buscarLike);
+        console.log(`🔍 Buscando por término adicional: "${buscarTrim}" (combinado con otros filtros)`);
+      }
     }
     
     query += ' ORDER BY p.nombres ASC';
@@ -184,6 +264,13 @@ router.get('/qr/:codigoQR', async (req, res) => {
 // Buscar aprendiz por documento
 router.get('/documento/:documento', async (req, res) => {
   try {
+    // Normalizar documento: eliminar caracteres que no sean dígitos
+    let documentoLimpio = String(req.params.documento || '').trim();
+    const soloNumeros = documentoLimpio.replace(/\D/g, '');
+    if (soloNumeros.length > 0) {
+      documentoLimpio = soloNumeros;
+    }
+
     const [aprendices] = await db.query(`
       SELECT 
         p.id_persona as id,
@@ -195,6 +282,7 @@ router.get('/documento/:documento', async (req, res) => {
         p.programa,
         p.ficha,
         p.estado,
+        p.foto,
         COALESCE(ep.nombre_estado, p.estado) as estado_detallado,
         rp.nombre_rol_persona as rol
       FROM personas p
@@ -202,7 +290,7 @@ router.get('/documento/:documento', async (req, res) => {
       LEFT JOIN estados_personas ep ON p.id_estado_persona = ep.id_estado_persona
       WHERE p.documento = ? 
         AND (LOWER(rp.nombre_rol_persona) LIKE '%aprendiz%' OR LOWER(rp.nombre_rol_persona) LIKE '%estudiante%')
-    `, [req.params.documento]);
+    `, [documentoLimpio]);
     
     if (aprendices.length === 0) {
       return res.status(404).json({ error: true, message: 'Aprendiz no encontrado' });
@@ -698,8 +786,30 @@ router.post('/bulk', async (req, res) => {
         // Limpiar datos
         const nombresLimpio = String(nombre).trim().substring(0, 100);
         const apellidosLimpio = apellido ? String(apellido).trim().substring(0, 100) : null;
-        const programaLimpio = programa ? String(programa).trim().substring(0, 200) : null;
-        const fichaLimpia = ficha ? String(ficha).trim().substring(0, 50) : null;
+        
+        // Validar y limpiar programa
+        let programaLimpio = null;
+        if (programa) {
+          const programaStr = String(programa).trim();
+          if (programaStr && programaStr !== 'null' && programaStr !== 'undefined' && programaStr !== '') {
+            programaLimpio = programaStr.substring(0, 200);
+          }
+        }
+        
+        // Validar y limpiar ficha - IMPORTANTE: asegurar que se guarde correctamente
+        let fichaLimpia = null;
+        if (ficha) {
+          const fichaStr = String(ficha).trim();
+          // Solo usar ficha si no es 'N/A', 'null', 'undefined' o vacío
+          if (fichaStr && fichaStr !== 'N/A' && fichaStr !== 'null' && fichaStr !== 'undefined' && fichaStr !== '') {
+            fichaLimpia = fichaStr.substring(0, 50);
+          }
+        }
+        
+        // Log detallado antes de guardar
+        console.log(`💾 Guardando aprendiz: Doc=${documentoLimpio}, Ficha=${fichaLimpia || 'null'}, Programa=${programaLimpio || 'null'}`);
+        console.log(`   - Ficha original recibida: "${ficha}"`);
+        console.log(`   - Ficha después de limpieza: "${fichaLimpia || 'null'}"`);
         
         // Validar y obtener estado de persona (estados_personas)
         let idEstadoPersona = null;
@@ -747,6 +857,17 @@ router.post('/bulk', async (req, res) => {
           [tipoDocLimpio, documentoLimpio, nombresLimpio, apellidosLimpio, codigoQR, 
            programaLimpio, fichaLimpia, estadoLimpio, idUsuarioFinal, idRolAprendiz, idEstadoPersona]
         );
+        
+        // Verificar que se guardó correctamente (solo para los primeros 3 para no saturar logs)
+        if (resultados.exitosos < 3) {
+          const [verificacion] = await db.query(
+            'SELECT ficha FROM personas WHERE documento = ?',
+            [documentoLimpio]
+          );
+          if (verificacion.length > 0) {
+            console.log(`   ✅ Verificado en BD: Ficha guardada = "${verificacion[0].ficha || 'null'}"`);
+          }
+        }
         
         resultados.exitosos++;
       } catch (error) {

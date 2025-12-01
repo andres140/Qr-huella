@@ -287,9 +287,11 @@ export const usuariosAPI = {
 // ============================================
 
 export const accesosAPI = {
-  getAll: async (params?: { fecha?: string; tipo?: string; personaId?: string; limit?: number }) => {
+  getAll: async (params?: { fecha?: string; fechaDesde?: string; fechaHasta?: string; tipo?: string; personaId?: string; limit?: number }) => {
     const queryParams = new URLSearchParams();
     if (params?.fecha) queryParams.append('fecha', params.fecha);
+    if (params?.fechaDesde) queryParams.append('fechaDesde', params.fechaDesde);
+    if (params?.fechaHasta) queryParams.append('fechaHasta', params.fechaHasta);
     if (params?.tipo) queryParams.append('tipo', params.tipo);
     if (params?.personaId) queryParams.append('personaId', params.personaId);
     if (params?.limit) queryParams.append('limit', params.limit.toString());
@@ -454,10 +456,12 @@ export const chatAPI = {
 // ============================================
 
 export const aprendicesAPI = {
-  getAll: async (params?: { estado?: string; buscar?: string }) => {
+  getAll: async (params?: { estado?: string; buscar?: string; ficha?: string; programa?: string }) => {
     const queryParams = new URLSearchParams();
     if (params?.estado) queryParams.append('estado', params.estado);
     if (params?.buscar) queryParams.append('buscar', params.buscar);
+    if (params?.ficha) queryParams.append('ficha', params.ficha);
+    if (params?.programa) queryParams.append('programa', params.programa);
     
     const response = await fetch(`${API_URL}/aprendices?${queryParams}`, {
       headers: getHeaders(),
@@ -755,6 +759,16 @@ export const visitantesAPI = {
   // Obtener todos los QR generados para un visitante
   getQRs: async (visitanteId: string) => {
     const response = await fetch(`${API_URL}/visitantes/${visitanteId}/qrs`, {
+      headers: getHeaders(),
+    });
+    
+    return handleResponse(response);
+  },
+  
+  // Marcar salidas automáticas de visitantes con QR expirado
+  marcarSalidasAutomaticas: async () => {
+    const response = await fetch(`${API_URL}/visitantes/marcar-salidas-automaticas`, {
+      method: 'POST',
       headers: getHeaders(),
     });
     

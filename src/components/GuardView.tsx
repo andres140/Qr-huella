@@ -58,6 +58,7 @@ export function GuardView({
   const [isRealScanning, setIsRealScanning] = useState(true);
   const [lastScannedCode, setLastScannedCode] = useState<string>('');
   const [isProcessingScan, setIsProcessingScan] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('scanner');
 
   // Formulario para registro de visitantes
   const [visitorForm, setVisitorForm] = useState({
@@ -94,8 +95,8 @@ export function GuardView({
   React.useEffect(() => {
     const checkNearExpiration = () => {
       const now = new Date();
-      const thresholdMs = 2 * 60 * 1000; // 2 minutos antes de vencer
-      const maxThresholdMs = 2 * 60 * 1000 + 30 * 1000; // 2 minutos y 30 segundos (ventana de alerta)
+      const alertThresholdMs = 2 * 60 * 1000; // 2 minutos antes de vencer
+      const windowMs = 30 * 1000; // Ventana de 30 segundos para evitar múltiples alertas
 
       visitorQRs.forEach((qr) => {
         if (qr.estado !== 'ACTIVO') return;
@@ -103,28 +104,34 @@ export function GuardView({
         const exp = qr.fechaExpiracion;
         const timeLeft = exp.getTime() - now.getTime();
 
-        // Verificar si está entre 2 minutos y 2 minutos 30 segundos antes de vencer
-        // Esto evita múltiples alertas para el mismo QR
+        // IMPORTANTE: Alertar 2 minutos antes, independientemente del tiempo total de validez
+        // Si el tiempo de validez es de 5 minutos, alertará a los 3 minutos (2 minutos antes)
+        // Si el tiempo de validez es de 24 horas, alertará 2 minutos antes de las 24 horas
         if (
           timeLeft > 0 &&
-          timeLeft <= thresholdMs &&
-          timeLeft > (thresholdMs - 30 * 1000) &&
+          timeLeft <= alertThresholdMs &&
+          timeLeft > (alertThresholdMs - windowMs) &&
           !warnedVisitorsRef.current.has(qr.id)
         ) {
           warnedVisitorsRef.current.add(qr.id);
           const minutosRestantes = Math.floor(timeLeft / 60000);
           const segundosRestantes = Math.floor((timeLeft % 60000) / 1000);
+          const horaVencimiento = exp.toLocaleTimeString('es-CO', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+          });
           toast.warning('⏰ QR de Visitante Próximo a Vencer', {
-            description: `${qr.visitante.nombre} (${qr.visitante.documento}) - Vence en ${minutosRestantes} min ${segundosRestantes} seg (${exp.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })})`,
+            description: `${qr.visitante.nombre} (${qr.visitante.documento}) - Vence en ${minutosRestantes} min ${segundosRestantes} seg (${horaVencimiento})`,
             duration: 10000,
           });
         }
       });
     };
 
-    // Verificar cada 10 segundos para detectar cuando falta exactamente 2 minutos
+    // Verificar cada 5 segundos para detectar cuando falta exactamente 2 minutos
     checkNearExpiration();
-    const interval = setInterval(checkNearExpiration, 10000);
+    const interval = setInterval(checkNearExpiration, 5000);
     return () => clearInterval(interval);
   }, [visitorQRs]);
 
@@ -249,14 +256,16 @@ export function GuardView({
         return;
       }
 
-      if (visitorQR.estado === 'EXPIRADO' || visitorQR.estado === 'USADO') {
+      // IMPORTANTE: Solo rechazar si está EXPIRADO, no si está USADO
+      // El QR puede usarse múltiples veces mientras esté vigente (para entrar y salir)
+      if (visitorQR.estado === 'EXPIRADO') {
         setScanResult({
           success: false,
-          message: `QR Inválido: Estado ${visitorQR.estado}`,
+          message: `QR Expirado: El código ha vencido`,
           person: visitorQR.visitante
         });
-        toast.error('❌ QR Inválido', {
-          description: `Estado del QR: ${visitorQR.estado}`,
+        toast.error('❌ QR Expirado', {
+          description: 'El código QR del visitante ha vencido',
           duration: 5000,
         });
         return;
@@ -861,6 +870,57 @@ export function GuardView({
     }
   };
 
+  // Reinicializar el escáner cuando se vuelve al tab del escáner
+  React.useEffect(() => {
+    if (activeTab === 'scanner') {
+      // Si el escáner no está activo, reiniciarlo automáticamente
+      if (!isRealScanning && !isProcessingScan) {
+        // Pequeño delay para asegurar que el DOM esté listo
+        const timer = setTimeout(async () => {
+          try {
+            setIsScanning(false);
+            setIsRealScanning(true);
+            setScanResult(null);
+            setLastScannedCode('');
+            setIsProcessingScan(false);
+            
+            // Solicitar permisos de cámara explícitamente
+            await navigator.mediaDevices.getUserMedia({ 
+              video: { 
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              } 
+            });
+            
+            console.log('✅ Cámara reinicializada al volver al tab del escáner');
+          } catch (error: any) {
+            console.error('Error al reinicializar cámara:', error);
+            setIsRealScanning(false);
+            toast.error(`Error al acceder a la cámara: ${error.message || 'Permisos denegados'}`);
+          }
+        }, 200);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      // Cuando se cambia a otro tab, detener el escáner para liberar recursos
+      if (isRealScanning) {
+        setIsRealScanning(false);
+        setIsScanning(false);
+        setIsProcessingScan(false);
+        setLastScannedCode('');
+        
+        // Detener todos los streams de video
+        if (videoRef.current && videoRef.current.srcObject) {
+          const stream = videoRef.current.srcObject as MediaStream;
+          stream.getTracks().forEach(track => track.stop());
+          videoRef.current.srcObject = null;
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   const formatTime = (date: Date | string | null | undefined) => {
     if (!date) return '--:--:--';
     try {
@@ -992,19 +1052,39 @@ export function GuardView({
       const qrData = visitanteBD;
       
       // Convertir fechaExpiracion a Date si viene como string
+      // IMPORTANTE: Usar la fecha exacta del backend sin conversión de zona horaria
       let fechaExpiracionDate: Date;
       if (qrData.fechaExpiracion) {
-        fechaExpiracionDate = new Date(qrData.fechaExpiracion);
+        // Si viene como string ISO, parsearlo correctamente
+        if (typeof qrData.fechaExpiracion === 'string') {
+          // Parsear la fecha manteniendo la hora local del servidor
+          fechaExpiracionDate = new Date(qrData.fechaExpiracion);
+        } else {
+          fechaExpiracionDate = new Date(qrData.fechaExpiracion);
+        }
+        
         // Validar que la fecha sea válida
         if (isNaN(fechaExpiracionDate.getTime())) {
           console.warn('⚠️ Fecha de expiración inválida, usando fecha por defecto');
           fechaExpiracionDate = new Date();
-          fechaExpiracionDate.setHours(fechaExpiracionDate.getHours() + 24);
+          fechaExpiracionDate.setHours(fechaExpiracionDate.getHours() + horasValidez);
+          fechaExpiracionDate.setMinutes(fechaExpiracionDate.getMinutes() + minutosValidez);
+        } else {
+          console.log(`✅ Fecha de expiración del backend: ${fechaExpiracionDate.toLocaleString('es-CO')}`);
         }
       } else {
-        // Si no hay fecha de expiración, usar 24 horas por defecto
+        // Si no hay fecha de expiración, calcularla desde ahora
         fechaExpiracionDate = new Date();
-        fechaExpiracionDate.setHours(fechaExpiracionDate.getHours() + 24);
+        fechaExpiracionDate.setHours(fechaExpiracionDate.getHours() + horasValidez);
+        fechaExpiracionDate.setMinutes(fechaExpiracionDate.getMinutes() + minutosValidez);
+      }
+      
+      // Obtener fecha de generación del backend si está disponible
+      let fechaGeneracionDate: Date;
+      if (qrData.fecha_registro) {
+        fechaGeneracionDate = new Date(qrData.fecha_registro);
+      } else {
+        fechaGeneracionDate = new Date();
       }
       
       // 3. Crear objeto VisitorQR para mostrar
@@ -1022,7 +1102,7 @@ export function GuardView({
           tipoSangre: visitorForm.tipoSangre || 'O+'
         },
         codigoQR: qrData.codigoQR,
-        fechaGeneracion: new Date(),
+        fechaGeneracion: fechaGeneracionDate,
         fechaExpiracion: fechaExpiracionDate,
         estado: 'ACTIVO',
         generadoPor: user.id,
@@ -1156,7 +1236,12 @@ export function GuardView({
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="scanner" className="space-y-6">
+      <Tabs 
+        defaultValue="scanner" 
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="space-y-6"
+      >
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="scanner" className="flex items-center gap-2">
             <Scan className="h-4 w-4" />

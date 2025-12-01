@@ -64,15 +64,18 @@ export function UserManagement({
     
     try {
       if (editingUser) {
-        // Actualizar usuario existente (solo actualizamos en estado local por ahora)
+        // Actualizar usuario existente
         const updatedUser: User = {
           ...editingUser,
           nombre: formData.nombre,
           email: formData.email,
           rol: formData.rol
         };
-        onUserUpdate(updatedUser);
-        toast.success('Usuario actualizado correctamente');
+        await onUserUpdate(updatedUser);
+        toast.success('✅ Usuario actualizado correctamente', {
+          description: 'Los cambios se han guardado en la base de datos',
+          duration: 3000,
+        });
       } else {
         // Crear nuevo usuario localmente
         if (formData.password.length < 6) {
@@ -108,13 +111,9 @@ export function UserManagement({
           fechaCreacion: new Date()
         };
 
-        onUserAdd(newUser);
+        await onUserAdd(newUser);
         
-        toast.success('✅ Usuario creado exitosamente', {
-          description: `${formData.nombre} puede iniciar sesión ahora`,
-          duration: 5000,
-          className: 'bg-green-50 border-green-200 text-green-900'
-        });
+        // El toast con las credenciales se muestra en App.tsx
       }
 
       // Limpiar formulario y cerrar dialog
@@ -147,7 +146,7 @@ export function UserManagement({
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (userId: string, userName: string) => {
+  const handleDelete = async (userId: string, userName: string) => {
     if (userId === currentUser.id) {
       toast.error('❌ Acción no permitida', {
         description: 'No puedes eliminar tu propia cuenta',
@@ -158,12 +157,16 @@ export function UserManagement({
     }
     
     if (window.confirm(`¿Estás seguro de eliminar a ${userName}?`)) {
-      onUserDelete(userId);
-      toast.success('✅ Usuario eliminado', {
-        description: `${userName} ha sido eliminado del sistema`,
-        duration: 3000,
-        className: 'bg-green-50 border-green-200 text-green-900'
-      });
+      try {
+        await onUserDelete(userId);
+        toast.success('✅ Usuario eliminado', {
+          description: `${userName} ha sido eliminado del sistema`,
+          duration: 3000,
+          className: 'bg-green-50 border-green-200 text-green-900'
+        });
+      } catch (error) {
+        // El error ya se maneja en App.tsx
+      }
     }
   };
 

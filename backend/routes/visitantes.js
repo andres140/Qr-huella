@@ -698,6 +698,10 @@ router.post('/registrar-acceso', async (req, res) => {
     // Usar TIMESTAMP completo con hora exacta
     const fechaHoraAhora = new Date();
     
+    // IMPORTANTE: El QR debe seguir siendo válido después de marcar la salida
+    // Solo se registra la entrada/salida, NO se modifica la fecha_expiracion del QR
+    // El QR puede usarse múltiples veces (entrar y salir) mientras esté vigente
+    
     // Registrar en la tabla registros_entrada_salida
     if (tipoFinal === 'ENTRADA') {
       await db.query(
@@ -736,6 +740,16 @@ router.post('/registrar-acceso', async (req, res) => {
         );
         console.log(`✅ Registro de SALIDA creado con hora exacta: ${fechaHoraAhora.toLocaleString('es-CO')}`);
       }
+      
+      // IMPORTANTE: Cuando se marca SALIDA, invalidar el QR inmediatamente
+      // Actualizar la fecha_expiracion a ahora para que el QR quede inválido
+      await db.query(
+        `UPDATE personas 
+         SET fecha_expiracion = ?
+         WHERE id_persona = ?`,
+        [fechaHoraAhora, visitanteId]
+      );
+      console.log(`🔒 QR invalidado al marcar SALIDA. Fecha de expiración actualizada a: ${fechaHoraAhora.toLocaleString('es-CO')}`);
     }
     
     console.log(`📝 ${tipoFinal} registrada para visitante ID: ${visitanteId}`);
