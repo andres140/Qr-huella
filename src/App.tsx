@@ -361,6 +361,51 @@ export default function App() {
           };
           setAccessRecords(prev => [newAccessRecord, ...prev]);
           toast.success(`✅ ${tipoRegistrado} de visitante registrada: ${validacion.data.nombre}`);
+          
+          // Recargar registros desde el backend para asegurar que tenemos todos los datos actualizados
+          setTimeout(async () => {
+            try {
+              const registrosResponse = await entradasSalidasAPI.getHoy();
+              if (registrosResponse.success && registrosResponse.data) {
+                const registrosAsAccessRecords: AccessRecord[] = registrosResponse.data.map((r: any) => {
+                  let timestamp = r.timestamp;
+                  if (r.fecha_entrada) {
+                    timestamp = r.fecha_entrada;
+                  } else if (r.fecha_salida) {
+                    timestamp = r.fecha_salida;
+                  }
+                  
+                  return {
+                    id: r.id,
+                    personaId: r.personaId || r.aprendizId,
+                    persona: personas.find(p => p.id === (r.personaId || r.aprendizId)) || {
+                      id: r.personaId || r.aprendizId,
+                      nombre: r.nombres || r.nombre || 'Sin nombre',
+                      apellido: r.apellidos || r.apellido || '',
+                      documento: r.documento,
+                      tipoDocumento: r.tipo_documento || 'CC',
+                      programa: r.programa || '',
+                      ficha: r.ficha || '',
+                      rol: 'ESTUDIANTE',
+                      estado: 'ACTIVO',
+                      tipoSangre: 'O+',
+                      foto: null,
+                    },
+                    tipo: r.tipo,
+                    timestamp: timestamp ? new Date(timestamp) : new Date(),
+                    fechaHora: timestamp ? new Date(timestamp) : new Date(),
+                    ubicacion: r.ubicacion || 'Entrada Principal',
+                    codigoQR: r.codigoQR || r.codigo_qr || '',
+                    fecha_entrada: r.fecha_entrada ? new Date(r.fecha_entrada) : undefined,
+                    fecha_salida: r.fecha_salida ? new Date(r.fecha_salida) : undefined,
+                  };
+                });
+                setAccessRecords(registrosAsAccessRecords);
+              }
+            } catch (error) {
+              console.error('Error al recargar registros:', error);
+            }
+          }, 500);
         }
       } else {
         // Registrar aprendiz
@@ -393,6 +438,51 @@ export default function App() {
             fecha_salida: fechaSalida,
           };
           setAccessRecords(prev => [newAccessRecord, ...prev]);
+          
+          // Recargar registros desde el backend para asegurar que tenemos todos los datos actualizados
+          setTimeout(async () => {
+            try {
+              const registrosResponse = await entradasSalidasAPI.getHoy();
+              if (registrosResponse.success && registrosResponse.data) {
+                const registrosAsAccessRecords: AccessRecord[] = registrosResponse.data.map((r: any) => {
+                  let timestamp = r.timestamp;
+                  if (r.fecha_entrada) {
+                    timestamp = r.fecha_entrada;
+                  } else if (r.fecha_salida) {
+                    timestamp = r.fecha_salida;
+                  }
+                  
+                  return {
+                    id: r.id,
+                    personaId: r.personaId || r.aprendizId,
+                    persona: personas.find(p => p.id === (r.personaId || r.aprendizId)) || {
+                      id: r.personaId || r.aprendizId,
+                      nombre: r.nombres || r.nombre || 'Sin nombre',
+                      apellido: r.apellidos || r.apellido || '',
+                      documento: r.documento,
+                      tipoDocumento: r.tipo_documento || 'CC',
+                      programa: r.programa || '',
+                      ficha: r.ficha || '',
+                      rol: 'ESTUDIANTE',
+                      estado: 'ACTIVO',
+                      tipoSangre: 'O+',
+                      foto: null,
+                    },
+                    tipo: r.tipo,
+                    timestamp: timestamp ? new Date(timestamp) : new Date(),
+                    fechaHora: timestamp ? new Date(timestamp) : new Date(),
+                    ubicacion: r.ubicacion || 'Entrada Principal',
+                    codigoQR: r.codigoQR || r.codigo_qr || '',
+                    fecha_entrada: r.fecha_entrada ? new Date(r.fecha_entrada) : undefined,
+                    fecha_salida: r.fecha_salida ? new Date(r.fecha_salida) : undefined,
+                  };
+                });
+                setAccessRecords(registrosAsAccessRecords);
+              }
+            } catch (error) {
+              console.error('Error al recargar registros:', error);
+            }
+          }, 500);
           
           const mensaje = response.tipoRegistrado && response.tipoRegistrado !== newRecord.tipo
             ? `${response.tipoRegistrado} registrada (tipo ajustado automáticamente)`

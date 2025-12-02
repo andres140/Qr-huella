@@ -36,14 +36,23 @@ export const calculateAccessStats = (
   personas.forEach(persona => {
     const personRecords = accessRecords
       .filter(record => record.personaId === persona.id)
-      .sort((a, b) => {
-        const dateA = a.timestamp || a.fechaHora || new Date(0);
-        const dateB = b.timestamp || b.fechaHora || new Date(0);
-        return dateB.getTime() - dateA.getTime();
-      });
+      .map(record => {
+        // Determinar la fecha más reciente: usar fecha_salida si existe, sino fecha_entrada, sino timestamp
+        let fechaRegistro: Date;
+        if (record.fecha_salida) {
+          fechaRegistro = new Date(record.fecha_salida);
+        } else if (record.fecha_entrada) {
+          fechaRegistro = new Date(record.fecha_entrada);
+        } else {
+          fechaRegistro = record.timestamp || record.fechaHora || new Date(0);
+        }
+        return { ...record, fechaRegistro };
+      })
+      .sort((a, b) => b.fechaRegistro.getTime() - a.fechaRegistro.getTime());
     
     if (personRecords.length > 0) {
       const lastRecord = personRecords[0];
+      // Si el último registro es ENTRADA, está dentro; si es SALIDA, está fuera
       personasStatus.set(persona.id, lastRecord.tipo === 'ENTRADA' ? 'DENTRO' : 'FUERA');
     } else {
       personasStatus.set(persona.id, 'FUERA');

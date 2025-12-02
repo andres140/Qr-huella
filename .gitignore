@@ -122,8 +122,6 @@ tramp
 *.sqlite3
 
 # Archivos de configuración sensibles
-config/database.js
-backend/config/database.js
 *.key
 *.pem
 *.cert

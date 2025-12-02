@@ -85,6 +85,19 @@ export function AdminView({
       minute: '2-digit',
     }).format(date);
 
+  const getRolIcon = (rol: string) => {
+    switch (rol) {
+      case 'ESTUDIANTE':
+        return <GraduationCap className="h-4 w-4" />;
+      case 'INSTRUCTOR':
+        return <Users className="h-4 w-4" />;
+      case 'ADMINISTRATIVO':
+        return <Shield className="h-4 w-4" />;
+      default:
+        return <UserCheck className="h-4 w-4" />;
+    }
+  };
+
   // Alertas de visitantes (solo notificaciones, sin formularios en esta pantalla)
   const visitantesOrdenados = [...visitorQRs].sort(
     (a, b) => b.fechaGeneracion.getTime() - a.fechaGeneracion.getTime(),
@@ -527,6 +540,127 @@ export function AdminView({
                   {stats.instructoresDentro + stats.administrativosDentro}
                 </div>
                 <p className="text-xs text-muted-foreground">Instructores y administrativos</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Sección de Entradas y Salidas Recientes */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Entradas Recientes */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <UserCheck className="h-5 w-5 text-green-600" />
+                  Entradas Recientes
+                </CardTitle>
+                <CardDescription>Últimas personas que ingresaron</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {accessRecords
+                    .filter(record => record.tipo === 'ENTRADA')
+                    .sort((a, b) => {
+                      const dateA = a.timestamp || a.fechaHora || new Date(0);
+                      const dateB = b.timestamp || b.fechaHora || new Date(0);
+                      return dateB.getTime() - dateA.getTime();
+                    })
+                    .slice(0, 20)
+                    .map((record) => (
+                      <div key={record.id} className="flex items-center justify-between p-2 border rounded-lg bg-green-50">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            {getRolIcon(record.persona.rol)}
+                            <div>
+                              <p className="font-medium text-sm">{record.persona.nombre}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {record.persona.documento} • {record.persona.rol}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right text-xs">
+                          <p className="font-medium">
+                            {new Intl.DateTimeFormat('es-CO', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit'
+                            }).format(record.timestamp || record.fechaHora || new Date())}
+                          </p>
+                          <p className="text-muted-foreground">
+                            {new Intl.DateTimeFormat('es-CO', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric'
+                            }).format(record.timestamp || record.fechaHora || new Date())}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  {accessRecords.filter(record => record.tipo === 'ENTRADA').length === 0 && (
+                    <p className="text-center text-muted-foreground py-4 text-sm">
+                      No hay entradas registradas hoy
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Salidas Recientes */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <X className="h-5 w-5 text-orange-600" />
+                  Salidas Recientes
+                </CardTitle>
+                <CardDescription>Últimas personas que salieron</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {accessRecords
+                    .filter(record => record.tipo === 'SALIDA')
+                    .sort((a, b) => {
+                      const dateA = a.timestamp || a.fechaHora || new Date(0);
+                      const dateB = b.timestamp || b.fechaHora || new Date(0);
+                      return dateB.getTime() - dateA.getTime();
+                    })
+                    .slice(0, 20)
+                    .map((record) => (
+                      <div key={record.id} className="flex items-center justify-between p-2 border rounded-lg bg-orange-50">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            {getRolIcon(record.persona.rol)}
+                            <div>
+                              <p className="font-medium text-sm">{record.persona.nombre}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {record.persona.documento} • {record.persona.rol}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right text-xs">
+                          <p className="font-medium">
+                            {new Intl.DateTimeFormat('es-CO', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit'
+                            }).format(record.timestamp || record.fechaHora || new Date())}
+                          </p>
+                          <p className="text-muted-foreground">
+                            {new Intl.DateTimeFormat('es-CO', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric'
+                            }).format(record.timestamp || record.fechaHora || new Date())}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  {accessRecords.filter(record => record.tipo === 'SALIDA').length === 0 && (
+                    <p className="text-center text-muted-foreground py-4 text-sm">
+                      No hay salidas registradas hoy
+                    </p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
